@@ -24,7 +24,7 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 from .config import Cooling, FaceBC, SIGMA_SB
-from .geometry import Geometry
+from .geometry import Geometry, REGION_ACTIVE, REGION_CAN
 
 
 @dataclass
@@ -50,9 +50,19 @@ class ThermalOperator:
     q_flux_out: np.ndarray = field(default_factory=lambda: np.zeros(0))
 
     @classmethod
-    def assemble(cls, geom: Geometry, cooling: Cooling) -> "ThermalOperator":
+    def assemble(cls, geom: Geometry, cooling: Cooling,
+                 t_surf_field: "np.ndarray | None" = None) -> "ThermalOperator":
+        """Assemble the sparse thermal operator.
+
+        ``t_surf_field`` (nx,ny,nz), if given, is the current temperature estimate used to
+        linearize radiation about the mean film temperature Tm=(Ts+T_inf)/2 (h_rad=4εσTm³),
+        which is far more accurate than linearizing about T_inf at large ΔT. When omitted,
+        radiation linearizes about T_inf (exact at ΔT=0, conservative/over-predicts T).
+        """
         grid = geom.grid
         nx, ny, nz = grid.nx, grid.ny, grid.nz
+        t_surf_flat = (np.ascontiguousarray(t_surf_field, dtype=np.float64).ravel()
+                       if t_surf_field is not None else None)
         dx, dy, dz = grid.dx, grid.dy, grid.dz
         N = nx * ny * nz
 
@@ -78,9 +88,22 @@ class ThermalOperator:
             out[m] = 2.0 * k1[m] * k2[m] / s[m]
             return out
 
-        def _add_interior(k, lo_idx, hi_idx, area, dist):
+        region = np.ascontiguousarray(geom.region)
+        gc = float(getattr(geom, "contact_conductance", 0.0))
+
+        def _add_interior(k, lo_idx, hi_idx, area, dist, reg_lo, reg_hi):
             kh = _harmonic(k[0], k[1])
             g = (kh * area / dist).ravel()
+            # Series interfacial contact resistance at the can-wall interface (PHYSICS §5):
+            #   1/G_face = 1/G_cond + 1/(contact_conductance * area)
+            # Applied on every face separating the interior (stack or gap) from the can wall.
+            if gc > 0.0:
+                iface = ((reg_lo == REGION_CAN) ^ (reg_hi == REGION_CAN)).ravel()
+                if np.any(iface):
+                    gcond = g[iface]
+                    gcontact = gc * area
+                    g = g.copy()
+                    g[iface] = 1.0 / (1.0 / np.maximum(gcond, 1e-300) + 1.0 / gcontact)
             p = lo_idx.ravel()
             q = hi_idx.ravel()
             rows.append(p); cols.append(p); vals.append(g)
@@ -91,13 +114,16 @@ class ThermalOperator:
         # Interior faces in each direction (adjacent cells share a face).
         if nx > 1:
             _add_interior((kx[:-1, :, :], kx[1:, :, :]),
-                          idx[:-1, :, :], idx[1:, :, :], area_x, dx)
+                          idx[:-1, :, :], idx[1:, :, :], area_x, dx,
+                          region[:-1, :, :], region[1:, :, :])
         if ny > 1:
             _add_interior((ky[:, :-1, :], ky[:, 1:, :]),
-                          idx[:, :-1, :], idx[:, 1:, :], area_y, dy)
+                          idx[:, :-1, :], idx[:, 1:, :], area_y, dy,
+                          region[:, :-1, :], region[:, 1:, :])
         if nz > 1:
             _add_interior((kz[:, :, :-1], kz[:, :, 1:]),
-                          idx[:, :, :-1], idx[:, :, 1:], area_z, dz)
+                          idx[:, :, :-1], idx[:, :, 1:], area_z, dz,
+                          region[:, :, :-1], region[:, :, 1:])
 
         # --- External faces / boundary conditions ------------------------------ #
         b_bc = np.zeros(N)
@@ -116,10 +142,17 @@ class ThermalOperator:
             half_dist: cell-center-to-face distance [m]
             """
             kind = bc.kind
-            # Linearized radiative surface coefficient (about the sink temperature t_inf):
-            #   q_rad = eps*sigma*(Ts^4 - Tinf^4) ~= h_rad*(Ts - Tinf),  h_rad = 4*eps*sigma*Tinf^3
-            # Applied on any non-dirichlet face with emissivity>0 (a real thermal-radiation path).
-            h_rad = (4.0 * bc.emissivity * SIGMA_SB * bc.t_inf**3) if bc.emissivity > 0.0 else 0.0
+            # Linearized radiative surface coefficient: q_rad = eps*sigma*(Ts^4 - Tinf^4)
+            #   ~= h_rad*(Ts - Tinf). Linearize about the mean film temperature Tm=(Ts+Tinf)/2
+            #   when a surface-T estimate is available (error <0.6% to ΔT~80 K), else about Tinf.
+            if bc.emissivity > 0.0:
+                if t_surf_flat is not None:
+                    t_m = 0.5 * (t_surf_flat[cell_idx] + bc.t_inf)
+                else:
+                    t_m = bc.t_inf
+                h_rad = 4.0 * bc.emissivity * SIGMA_SB * t_m**3
+            else:
+                h_rad = 0.0
             g_rad = h_rad * area
 
             if kind == "dirichlet":
@@ -164,6 +197,37 @@ class ThermalOperator:
                     area_y, dy / 2.0)
         _apply_face(cooling.y_max, idx[:, -1, :].ravel(), ky[:, -1, :].ravel(),
                     area_y, dy / 2.0)
+
+        # Tab conduction-to-ambient heat loss (PHYSICS §5): the tab's far end is heat-sunk near
+        # the coolant temperature. Distribute each polarity's tab thermal conductance over its
+        # attachment control volumes (the tab-node columns, across their active z-cells). Tab
+        # sink temperature = mean of the non-adiabatic face temperatures (config-driven).
+        tinfs = [f.t_inf for f in (cooling.top, cooling.bottom, cooling.x_min,
+                                   cooling.x_max, cooling.y_min, cooling.y_max)
+                 if f.kind in ("convection", "dirichlet")]
+        t_tab = float(np.mean(tinfs)) if tinfs else float(cooling.top.t_inf)
+
+        def _apply_tab_thermal(node_lists, g_total):
+            if g_total <= 0.0:
+                return
+            cells = []
+            for roll, nodes in node_lists:
+                for (i, j) in nodes:
+                    for k in roll.col_zcells.get((i, j), []):
+                        cells.append(idx[i, j, k])
+            if not cells:
+                return
+            g_each = g_total / len(cells)
+            for f in cells:
+                diag_bc[f] += g_each
+                b_bc[f] += g_each * t_tab
+                g_amb[f] += g_each
+                gt_amb[f] += g_each * t_tab
+
+        _apply_tab_thermal([(r, r.tab_pos_nodes) for r in geom.rolls],
+                           float(getattr(geom, "tab_heat_cond_pos", 0.0)))
+        _apply_tab_thermal([(r, r.tab_neg_nodes) for r in geom.rolls],
+                           float(getattr(geom, "tab_heat_cond_neg", 0.0)))
 
         # Boundary conductances add to the diagonal.
         if np.any(diag_bc):

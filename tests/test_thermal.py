@@ -111,3 +111,25 @@ def test_emissivity_augments_convection():
     T_conv = solve_steady(op_conv, q)
     T_both = solve_steady(op_both, q)
     assert T_both.max() < T_conv.max()
+
+
+def test_radiation_mean_film_matches_physical_t4():
+    """Iterating the mean-film linearization reproduces the physical T^4 rejection (<1.5%)."""
+    from prismaticcell.config import SIGMA_SB
+    nx, ny, nz, dx = 5, 5, 5, 3e-3
+    geom = make_uniform_geometry(nx, ny, nz, dx, k=3.0, rho_cp=2e6)
+    eps, tinf = 0.9, 298.15
+    faces = {f: FaceBC("adiabatic", t_inf=tinf, emissivity=eps)
+             for f in ("top", "bottom", "x_min", "x_max", "y_min", "y_max")}
+    cool = Cooling(**faces)
+    q = 15000.0
+    T = np.full((nx, ny, nz), tinf)
+    for _ in range(40):
+        op = ThermalOperator.assemble(geom, cool, t_surf_field=T)
+        T = solve_steady(op, np.full((nx, ny, nz), q)).reshape(nx, ny, nz)
+    A = dx * dx
+    phys = 0.0
+    for face in (T[:, :, 0], T[:, :, -1], T[0, :, :], T[-1, :, :], T[:, 0, :], T[:, -1, :]):
+        phys += float((eps * SIGMA_SB * (face**4 - tinf**4) * A).sum())
+    gen = q * (nx * ny * nz * dx**3)
+    assert abs(phys - gen) / gen < 0.015

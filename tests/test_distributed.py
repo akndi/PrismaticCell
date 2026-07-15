@@ -156,3 +156,22 @@ def test_layered_resolves_through_thickness_potential(baseline_cfg):
     dphi_layered = np.array([sl_.dphi_field[col[0], col[1], k] for k in ks])
     assert dphi_planar.max() - dphi_planar.min() < 1e-9        # planar: identical across z
     assert dphi_layered.max() - dphi_layered.min() > 1e-4      # layered: genuinely varies in z
+
+
+def test_tab_resistance_affects_terminal_voltage(baseline_cfg):
+    """A longer (more resistive) tab produces a larger terminal IR drop (lower V)."""
+    import copy
+    cfg = baseline_cfg
+    cfg.mesh.nx, cfg.mesh.ny, cfg.mesh.nz = 8, 10, 6
+    cfg_long = copy.deepcopy(cfg)
+    for t in cfg_long.tabs:
+        t.length *= 50.0                                # much higher R_tab = L/(sigma w t)
+    geom_a, model = build_geometry(cfg), ECMModel.from_config(cfg)
+    geom_b = build_geometry(cfg_long)
+    assert geom_b.g_tab_pos < geom_a.g_tab_pos          # longer tab -> lower conductance
+    n = int(geom_a.active_mask.sum())
+    state = ECMState(soc=np.full(n, 0.6), rc_u=np.zeros((model.n_rc, n)))
+    T = np.full((geom_a.grid.nx, geom_a.grid.ny, geom_a.grid.nz), cfg.t_init)
+    v_short = solve_network(geom_a, model, state, T, 40.0, mode="current").v_terminal
+    v_long = solve_network(geom_b, model, state, T, 40.0, mode="current").v_terminal
+    assert v_long < v_short                              # more tab resistance -> lower terminal V

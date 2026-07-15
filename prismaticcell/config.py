@@ -113,6 +113,8 @@ class Enclosure:
     material: str               # key into material database
     wall_thickness: float       # m
     contact_conductance: float  # W/m^2/K, stack<->wall interfacial conductance
+    tab_heat_sink: bool = True  # if True, tabs conduct heat to ambient at their far end
+                                # (busbar/terminal heat-sunk near the coolant temperature)
 
 
 # --------------------------------------------------------------------------- #
@@ -217,6 +219,8 @@ class Solver:
     newton_tol: float = 1e-9    # convergence tol on the electro network solve
     newton_max: int = 50        # max Newton iterations for the network
     linear_solver: Literal["direct", "cg"] = "direct"
+    steady_relax: float = 0.5   # under-relaxation factor for the steady fixed-point (0<w<=1)
+    steady_max: int = 300       # max iterations for the steady coupled fixed-point
     # Collector network fidelity: "planar" = one shared 2-D foil potential per jellyroll
     # (2.5-D; fast); "layered" = a separate 2-D foil potential per through-thickness stack
     # layer, all in parallel at the tabs (full 3-D collector; resolves through-thickness

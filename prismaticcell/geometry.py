@@ -75,6 +75,11 @@ class Geometry:
     cap_cv: np.ndarray
     rolls: List[RollElectro]
     outer_dims: Tuple[float, float, float]
+    contact_conductance: float = 0.0   # W/m^2/K, stack<->can-wall interfacial conductance
+    g_tab_pos: float = 0.0             # S, total physical conductance of the +tab(s): sigma*w*t/L
+    g_tab_neg: float = 0.0             # S, total physical conductance of the -tab(s)
+    tab_heat_cond_pos: float = 0.0     # W/K, +tab conduction to ambient (thermal loss path)
+    tab_heat_cond_neg: float = 0.0     # W/K, -tab conduction to ambient
 
     @property
     def n_active(self) -> int:
@@ -269,6 +274,23 @@ def build_geometry(cfg: SimConfig) -> Geometry:
             tab_neg_nodes=tab_neg_nodes,
         ))
 
+    # Tab electrical + thermal conductances from tab geometry/material (PHYSICS §3, §5):
+    #   electrical G = sigma * (w*t) / L  [S];  thermal G = k * (w*t) / L  [W/K]
+    g_tab_pos = g_tab_neg = 0.0
+    tab_heat_pos = tab_heat_neg = 0.0
+    for tab in cfg.tabs:
+        mat = cfg.materials[tab.material]
+        L = max(tab.length, 1e-9)
+        xsec = tab.width * tab.thickness
+        if tab.polarity == "pos":
+            g_tab_pos += mat.sigma_elec * xsec / L
+            tab_heat_pos += mat.k_in * xsec / L
+        else:
+            g_tab_neg += mat.sigma_elec * xsec / L
+            tab_heat_neg += mat.k_in * xsec / L
+    if not cfg.enclosure.tab_heat_sink:
+        tab_heat_pos = tab_heat_neg = 0.0   # tabs thermally isolated (no far-end heat sink)
+
     # Capacity per CV proportional to effective electrode area; normalized to exact total
     cap_cv = np.zeros((nx, ny, nz))
     tot_area = area_eff_total.sum()
@@ -285,6 +307,9 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         cap_cv=cap_cv,
         rolls=rolls,
         outer_dims=(Lx, Ly, Lz),
+        contact_conductance=cfg.enclosure.contact_conductance,
+        g_tab_pos=g_tab_pos, g_tab_neg=g_tab_neg,
+        tab_heat_cond_pos=tab_heat_pos, tab_heat_cond_neg=tab_heat_neg,
     )
 
 

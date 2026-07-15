@@ -98,7 +98,8 @@ class ECMState:                               # per active CV, flat arrays over 
 
 # Local through-CV areal current density from shared column Δφ and this CV's state:
 #   v = ocv(soc,T) - j_area*R0 - Σ_p u_p ;  and v == Δφ  ->  j_area = (ocv - Σu - Δφ)/R0
-# Heat per CV (PHYSICS §4): q_ecm = i*(ocv - v); q_rev = i*T*dudt(soc); returned by coupling.
+# Heat per CV (PHYSICS §4): q_ecm = i*(ocv - v); q_rev = -i*T*dudt(soc) [Bernardi minus sign];
+# returned by coupling.
 ```
 
 `Arrhenius`: `X(T) = X_ref * exp[(Ea/R_GAS)(1/T - 1/t_ref)]` using `config.R_GAS`.

@@ -87,10 +87,26 @@ from scipy.sparse.linalg import spsolve
 
 from .geometry import Geometry, RollElectro
 
-# Tab conductance = TAB_CONDUCTANCE_FACTOR * (roll foil sheet-conductance scale [S]).
-# Large enough that the tab footprint is effectively equipotential with the terminal,
-# small enough to keep the linear system well-conditioned for a direct solve.
+# Fallback tab conductance = TAB_CONDUCTANCE_FACTOR * (roll foil sheet-conductance scale [S]),
+# used only if no physical tab conductance is defined (sigma or geometry missing). Otherwise the
+# physical tab conductance G = sigma*w*t/L (geom.g_tab_pos/neg) is distributed over the tab nodes,
+# so tab material/size/length produce a real terminal IR drop (tab-placement design lever).
 TAB_CONDUCTANCE_FACTOR = 1.0e4
+
+
+def _tab_conductances(geom, n_pos_nodes, n_neg_nodes):
+    """Per-tab-node conductance to the terminal for + and - polarity.
+
+    Distributes the physical tab conductance (geom.g_tab_pos/neg [S]) over its nodes; falls
+    back to a strong near-equipotential conductance if no physical value is available.
+    """
+    sheet_scale = max((max(r.sheet_cond_pos, r.sheet_cond_neg) for r in geom.rolls), default=1.0)
+    fallback = TAB_CONDUCTANCE_FACTOR * sheet_scale
+    g_pos = float(getattr(geom, "g_tab_pos", 0.0) or 0.0)
+    g_neg = float(getattr(geom, "g_tab_neg", 0.0) or 0.0)
+    G_pos = (g_pos / n_pos_nodes) if (g_pos > 0.0 and n_pos_nodes > 0) else fallback
+    G_neg = (g_neg / n_neg_nodes) if (g_neg > 0.0 and n_neg_nodes > 0) else fallback
+    return G_pos, G_neg
 
 
 @dataclass
@@ -215,11 +231,10 @@ def solve_network(
         Vp_fixed = float(applied)   # Vp - Vn = applied, Vn = 0
     Vn = 0.0  # negative terminal is the grounded reference
 
-    # tab conductance scale from the foils actually present
-    sheet_scale = max(
-        max(r.sheet_cond_pos, r.sheet_cond_neg) for r in geom.rolls
-    ) if geom.rolls else 1.0
-    G_tab = TAB_CONDUCTANCE_FACTOR * sheet_scale
+    # physical tab conductance distributed over the tab nodes (real terminal IR drop)
+    n_pos_nodes = sum(len(r.tab_pos_nodes) for r in geom.rolls)
+    n_neg_nodes = sum(len(r.tab_neg_nodes) for r in geom.rolls)
+    G_pos, G_neg = _tab_conductances(geom, n_pos_nodes, n_neg_nodes)
 
     rows: list = []
     cols: list = []
@@ -279,20 +294,20 @@ def solve_network(
             # eq (B) phi_neg node:  ... − g(φ⁺ − φ⁻) = −Isrc
             add(q, q, g_ij); add(q, p, -g_ij); rhs[q] += -isrc_ij
 
-        # tabs -> terminal (strong conductance). multiplicity handled by iterating list.
+        # tabs -> terminal via the physical tab conductance (per node)
         for c in roll.tab_pos_nodes:
             p = pos_dof[(r, c)]
-            add(p, p, G_tab)
+            add(p, p, G_pos)
             if current_mode:
-                add(p, vp_dof, -G_tab)
-                add(vp_dof, p, -G_tab)
-                add(vp_dof, vp_dof, G_tab)
+                add(p, vp_dof, -G_pos)
+                add(vp_dof, p, -G_pos)
+                add(vp_dof, vp_dof, G_pos)
             else:
-                rhs[p] += G_tab * Vp_fixed          # Vp known
+                rhs[p] += G_pos * Vp_fixed          # Vp known
         for c in roll.tab_neg_nodes:
             q = neg_dof[(r, c)]
-            add(q, q, G_tab)
-            rhs[q] += G_tab * Vn                     # Vn = 0 (grounded)
+            add(q, q, G_neg)
+            rhs[q] += G_neg * Vn                     # Vn = 0 (grounded)
 
     # terminal constraint row (galvanostatic): the applied current is EXTRACTED at the +
     # terminal on discharge, i.e. Σ_(+ tabs) G_tab (φ⁺ − Vp) = applied. With the assembled
@@ -447,8 +462,13 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
         vp_dof = None
         Vp_fixed = float(applied)
 
-    sheet_scale = max(max(r.sheet_cond_pos, r.sheet_cond_neg) for r in geom.rolls)
-    G_tab = TAB_CONDUCTANCE_FACTOR * sheet_scale
+    # physical tab conductance distributed over ALL (layer, node) attachments so the total
+    # terminal tab conductance equals the planar case (no n_layers double-counting)
+    n_pos_nodes = sum(len(roll.tab_pos_nodes) * len(roll_layers[roll.roll_index])
+                      for roll in geom.rolls)
+    n_neg_nodes = sum(len(roll.tab_neg_nodes) * len(roll_layers[roll.roll_index])
+                      for roll in geom.rolls)
+    G_pos, G_neg = _tab_conductances(geom, n_pos_nodes, n_neg_nodes)
 
     rows: list = []
     cols: list = []
@@ -490,17 +510,17 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
                 if not is_active(roll, k, c):
                     continue
                 p = pos_dof[(r, k, c)]
-                add(p, p, G_tab)
+                add(p, p, G_pos)
                 if current_mode:
-                    add(p, vp_dof, -G_tab); add(vp_dof, p, -G_tab); add(vp_dof, vp_dof, G_tab)
+                    add(p, vp_dof, -G_pos); add(vp_dof, p, -G_pos); add(vp_dof, vp_dof, G_pos)
                 else:
-                    rhs[p] += G_tab * Vp_fixed
+                    rhs[p] += G_pos * Vp_fixed
             for c in roll.tab_neg_nodes:
                 if not is_active(roll, k, c):
                     continue
                 q = neg_dof[(r, k, c)]
-                add(q, q, G_tab)
-                rhs[q] += G_tab * Vn
+                add(q, q, G_neg)
+                rhs[q] += G_neg * Vn
 
     if current_mode:
         rhs[vp_dof] += -float(applied)

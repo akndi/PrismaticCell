@@ -74,21 +74,22 @@ current concentrating toward the tabs:
 ![temperature field](docs/figures/baseline_temperature_slice.png)
 ![current distribution](docs/figures/baseline_current_distribution.png)
 
-Design studies find real trade-offs: cooling a large face (top/bottom) holds ~45 °C vs ~80 °C for
-a side face at 2C (`examples/cooling_comparison.py`); and placing the two tabs at opposite ends of
-the edge minimizes current-density non-uniformity (`examples/tab_placement_sweep.py`).
+Design studies find real trade-offs: cooling a large face (top/bottom) holds ~44 °C vs ~61 °C for
+a side face at 2C (`examples/cooling_comparison.py`); and because tabs carry a real series
+resistance, tab placement strongly shapes the current-density spread (tens-of-percent to >150 %),
+so opposite-end placement is preferable (`examples/tab_placement_sweep.py`).
 
 ![tab sweep](docs/figures/tab_sweep_current_spread.png)
 
 Radiation matters when convection is weak: under natural convection (h=5 W/m²/K), raising surface
-emissivity 0→0.9 drops peak temperature ~11 °C and grows radiation to ~55 % of total heat
+emissivity 0→0.9 drops peak temperature ~6 °C and grows radiation to ~54 % of total heat
 rejection (`examples/cooling_comparison.py`):
 
 ![radiation contribution](docs/figures/radiation_contribution.png)
 
 ## Validation
 
-`python -m pytest` runs 26 checks (PHYSICS §7): 1-D steady conduction vs closed form, lumped-
+`python -m pytest` runs 31 checks (PHYSICS §7): 1-D steady conduction vs closed form, lumped-
 capacitance transient, adiabatic-pulse and steady energy conservation, symmetric-cooling symmetry,
 radiation energy balance, SOC Coulomb balance, Arrhenius direction, entropy sign, charge
 conservation (planar & layered), discharge-below-OCV, the single-roll lumped limit, the layered

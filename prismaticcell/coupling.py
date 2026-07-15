@@ -106,6 +106,12 @@ def _heat_map(geom: Geometry, model: ECMModel, state: ECMState, sol,
     return q_vol
 
 
+def _has_radiation(cooling) -> bool:
+    return any(getattr(f, "emissivity", 0.0) > 0.0 for f in (
+        cooling.top, cooling.bottom, cooling.x_min, cooling.x_max,
+        cooling.y_min, cooling.y_max))
+
+
 def run(cfg: SimConfig) -> Result:
     """Run the coupled simulation described by ``cfg`` (transient or steady)."""
     geom = build_geometry(cfg)
@@ -140,10 +146,14 @@ def run(cfg: SimConfig) -> Result:
     M = op.M
     U0 = float((M * T_field.ravel(order="C")).sum())
 
+    rad = _has_radiation(cfg.cooling)
     last_sol = None
     for s in range(nsteps):
         t = s * dt
         mode, applied = applied_at(cfg, t)
+        # Refresh the radiative linearization about the current film temperature (PHYSICS §5.1)
+        if rad:
+            op = ThermalOperator.assemble(geom, cfg.cooling, t_surf_field=T_field)
         # ---- coupling sub-iteration: network<->thermal at fixed z,u ----
         T_iter = T_field
         for _ in range(cfg.solver.max_subiter):
@@ -207,32 +217,72 @@ def run(cfg: SimConfig) -> Result:
     )
 
 
+def _steady_dc_rc(model, state, j_area_active, T_act):
+    """Set each RC overpotential to its DC steady limit u_p = j_area * R_p(soc, T).
+
+    At a genuine DC operating point the double-layer/diffusion capacitors are fully charged,
+    so all current flows through R_p and the polarization is j*R_p (not zero). Without this the
+    "steady" state is the instantaneous t=0+ response (missing the RC polarization heat).
+    """
+    for p in range(state.rc_u.shape[0]):
+        Rp = np.asarray(model.rc_area(p, state.soc, T_act)[0]).reshape(-1)
+        state.rc_u[p] = j_area_active * Rp
+
+
 def _run_steady(cfg, geom, model, op, state, T_field, active_ijk, cap_act) -> Result:
-    """Steady operating point: iterate network<->steady-thermal to self-consistency."""
+    """Steady operating point via an under-relaxed, RC-polarized coupled fixed point.
+
+    The map T -> solve_steady(q(network(T), T)) can have Lipschitz constant > 1 at stiff
+    coupling (strong Arrhenius R0(T) at low cooling), so a plain Picard iteration oscillates.
+    We under-relax T and drive the RC branches to their DC limit each iteration, and we REPORT
+    whether the fixed point actually converged (``energy_balance['converged']``).
+    """
+    import warnings
     grid = geom.grid
     nx, ny, nz = grid.nx, grid.ny, grid.nz
     V = grid.volume()
     ii, jj, kk = active_ijk[:, 0], active_ijk[:, 1], active_ijk[:, 2]
     mode, applied = applied_at(cfg, 0.0)
+    omega = float(cfg.solver.steady_relax)
+    rad = _has_radiation(cfg.cooling)
     T_iter = T_field
     sol = None
-    for _ in range(max(cfg.solver.max_subiter, 50)):
+    q_vol = None
+    converged = False
+    for _ in range(int(cfg.solver.steady_max)):
+        if rad:
+            op = ThermalOperator.assemble(geom, cfg.cooling, t_surf_field=T_iter)
+        sol = solve_network(geom, model, state, T_iter, applied,
+                            mode=mode, tol=cfg.solver.newton_tol, maxiter=cfg.solver.newton_max,
+                            collector_model=cfg.solver.collector_model)
+        # drive RC branches to their DC limit at the current operating point
+        _steady_dc_rc(model, state, sol.j_area[ii, jj, kk], T_iter[ii, jj, kk])
+        # re-solve the network now that RC polarization is included (DC-consistent)
         sol = solve_network(geom, model, state, T_iter, applied,
                             mode=mode, tol=cfg.solver.newton_tol, maxiter=cfg.solver.newton_max,
                             collector_model=cfg.solver.collector_model)
         q_vol = _heat_map(geom, model, state, sol, T_iter, active_ijk)
         T_new = solve_steady(op, q_vol).reshape(nx, ny, nz)
-        if np.max(np.abs(T_new - T_iter)) < cfg.solver.coupling_tol:
-            T_iter = T_new
+        dT = float(np.max(np.abs(T_new - T_iter)))
+        T_iter = T_iter + omega * (T_new - T_iter)          # under-relaxed update
+        if dT < cfg.solver.coupling_tol:
+            converged = True
             break
-        T_iter = T_new
+    if not converged:
+        warnings.warn(
+            "steady coupled fixed point did not converge to solver.coupling_tol in "
+            f"{cfg.solver.steady_max} iterations (last |dT|={dT:.3g} K). Try a smaller "
+            "solver.steady_relax or use transient mode. Result is the last iterate.",
+            RuntimeWarning,
+        )
     q_step = float((q_vol * V).sum())
     removed = boundary_heat_removed(op, T_iter.ravel(order="C"))
     soc_field = np.full((nx, ny, nz), np.nan)
     soc_field[ii, jj, kk] = state.soc
     energy_balance = {"generated_W": q_step, "removed_W": removed,
                       "residual_W": q_step - removed,
-                      "closure_rel": (q_step - removed) / (abs(q_step) + 1e-30)}
+                      "closure_rel": (q_step - removed) / (abs(q_step) + 1e-30),
+                      "converged": converged}
     return Result(
         t=np.array([0.0]), v_terminal=np.array([sol.v_terminal]),
         i_terminal=np.array([sol.i_terminal]), soc_mean=np.array([float(state.soc.mean())]),

@@ -175,13 +175,24 @@ harmonic mean of the two cells' directional conductivities (series resistance).
 - **Dirichlet:** `T_s = T_wall` (constant-temperature cooling)
 - **Neumann:** `−k ∂T/∂n = q″` (fixed flux; `q″=0` → adiabatic)
 - **Radiation** (any non-Dirichlet face with `emissivity > 0`): `q_rad = εσ(T_s⁴ − T_∞⁴)`,
-  linearized about the sink as `h_rad = 4εσT_∞³` and added **in parallel** with the convective
-  film (both in series with the half-cell conduction). Valid for moderate ΔT; for large ΔT the
-  coefficient can be iterated on the surface temperature.
+  linearized as `h_rad = 4εσT_m³` about the **mean film temperature** `T_m=(T_s+T_∞)/2` (the
+  transient/steady drivers re-linearize each step/iteration from the current surface temperature,
+  giving <0.6% error to ΔT≈80 K). If no surface estimate is available it falls back to
+  linearizing about `T_∞` (exact at ΔT=0, otherwise conservative — over-predicts T). Added **in
+  parallel** with the convective film, both in series with the half-cell conduction. Assumes a
+  **gray-diffuse surface with view factor 1** to large isothermal surroundings at `T_∞` (valid
+  for an isolated convex cell); the radiative sink is taken equal to the convective `T_∞`.
+- **Tab heat loss** (`enclosure.tab_heat_sink`, default on): each tab conducts heat from its
+  attachment control volumes to ambient with conductance `k·w·t/L` (far end heat-sunk near the
+  mean coolant temperature). A real terminal heat path; disable for thermally isolated tabs.
+- **Stack↔wall contact** (`enclosure.contact_conductance`): a series interfacial conductance
+  `G = h_c·A` applied on stack↔can-wall control-volume faces.
 
-Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere), **convection**
-(external Newton cooling; internal gaps are effective-conduction media, not resolved fluid flow),
-and **radiation** (external faces, linearized Stefan–Boltzmann).
+Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere; stack↔wall via a
+contact conductance; tab heat-loss path), **convection** (external Newton cooling; internal gaps
+are effective-conduction media — valid for sub-few-mm gaps at modest ΔT, where buoyancy is absent;
+cross-gap radiation is neglected), and **radiation** (external faces, linearized Stefan–Boltzmann
+about the film temperature).
 
 ### 5.2 Steady state
 
@@ -209,6 +220,33 @@ Per timestep, staggered with optional sub-iteration to convergence:
 The loop is genuinely bidirectional: heat comes from the electro state; the electro parameters
 (R, Q, dynamics) depend on the thermal field. Global energy balance
 `∫ Σ Q_k dt = ΔU_thermal + Q_removed_at_boundaries` is asserted in tests.
+
+**Accuracy & scope notes:**
+- The scheme is **first-order (O(Δt))** operator splitting: the T-sub-iteration converges the
+  fully-implicit thermal fixed point at fixed electrochemical state, but SOC/RC are advanced once
+  per step with the step's current and the network is not re-solved after that advance. Verified
+  O(Δt) by Δt refinement. Backward-Euler (thermal) + exact-exponential RC + explicit coulomb SOC
+  is unconditionally stable (no CFL limit); only accuracy degrades at large Δt.
+- **`energy_balance['closure_rel']` is a thermal-solver self-consistency check** (injected heat =
+  stored + removed), not an electro↔thermal validator. The injected irreversible term
+  `i(U_ocv−Δφ)` equals true resistive dissipation `i²R0 + Σu²/R_p` **plus** the rate of energy
+  stored in the RC capacitors; this RC-storage term integrates to zero over a full relaxation but
+  is nonzero transiently (up to ~10% of ECM heat while the double layer charges). This is the
+  standard Bernardi/ECM convention (heat exact per cycle), documented here as a bounded transient.
+- **Steady mode** solves the coupled fixed point with **under-relaxation** (`solver.steady_relax`)
+  because the map is stiff (strong Arrhenius R0(T)); a plain Picard iteration oscillates between a
+  hot and cold branch at low cooling. The RC branches are set to their **DC limit** `u_p=j·R_p`
+  (a true steady state, not the t=0⁺ response). Convergence is reported in
+  `energy_balance['converged']` and a non-converged run warns rather than silently returning a
+  non-physical iterate.
+
+**Electrochemical/geometry idealizations (bounded modeling choices):**
+- OCV is treated as temperature-independent in the voltage closure (the `dU/dT` term enters only
+  the reversible heat); the omitted `(dU/dT)(T−T_ref)` OCV shift is ~3 mV at ΔT=30 K for LFP.
+- Each jellyroll is modeled as `n_stacks` flat parallel sandwiches meeting only at the tabs — a
+  **stacked-equivalent** idealization of a wound roll (no continuous-spiral foil path).
+- Tabs carry a physical series resistance `R=L/(σ·w·t)`; weld/contact resistance beyond the tab
+  body is not separately modeled.
 
 ---
 

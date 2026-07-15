@@ -62,3 +62,45 @@ def test_layered_collector_energy_closure(small_cfg):
     res = run(cfg)
     assert abs(res.energy_balance["closure_rel"]) < 1e-6
     assert res.v_terminal[-1] < res.v_terminal[0] or res.soc_mean[-1] < res.soc_mean[0]
+
+
+def test_steady_converges_and_is_monotonic(small_cfg):
+    """Steady fixed point converges (flag set) and stronger cooling lowers temperature."""
+    import copy
+    from prismaticcell.config import Cooling, FaceBC
+
+    def steady_at(h):
+        cfg = copy.deepcopy(small_cfg)
+        cfg.solver.mode = "steady"
+        cfg.load.kind = "constant_current"
+        cfg.load.value = 20.0
+        bc = lambda: FaceBC("convection", h=h, t_inf=298.15)
+        cfg.cooling = Cooling(top=bc(), bottom=bc(), x_min=bc(), x_max=bc(), y_min=bc(), y_max=bc())
+        return run(cfg)
+
+    lo, hi = steady_at(5.0), steady_at(100.0)
+    assert lo.energy_balance["converged"] and hi.energy_balance["converged"]
+    assert lo.T_max[-1] > hi.T_max[-1]                 # less cooling => hotter
+    assert abs(lo.energy_balance["closure_rel"]) < 1e-3
+
+
+def test_contact_conductance_raises_stack_temperature(small_cfg):
+    """A poorer stack<->wall contact traps heat -> higher peak temperature.
+
+    Needs nz fine enough to resolve the can wall (dz < wall_thickness) so REGION_CAN cells
+    exist for the contact interface.
+    """
+    import copy
+    base = copy.deepcopy(small_cfg)
+    base.mesh.nx, base.mesh.ny, base.mesh.nz = 6, 6, 12   # resolve the top/bottom wall in z
+    cfg_lo = copy.deepcopy(base); cfg_lo.enclosure.contact_conductance = 20.0
+    cfg_hi = copy.deepcopy(base); cfg_hi.enclosure.contact_conductance = 1e6
+    assert run(cfg_lo).T_max[-1] > run(cfg_hi).T_max[-1]
+
+
+def test_tab_heat_sink_lowers_temperature(small_cfg):
+    """Enabling the tab conduction-to-ambient path removes heat -> lower peak temperature."""
+    import copy
+    cfg_off = copy.deepcopy(small_cfg); cfg_off.enclosure.tab_heat_sink = False
+    cfg_on = copy.deepcopy(small_cfg); cfg_on.enclosure.tab_heat_sink = True
+    assert run(cfg_on).T_max[-1] < run(cfg_off).T_max[-1]
