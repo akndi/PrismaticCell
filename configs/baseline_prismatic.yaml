@@ -50,6 +50,8 @@ enclosure:
   material: can_al
   wall_thickness: 0.8e-3
   contact_conductance: 150.0   # W/m^2/K, stack-to-wall interfacial conductance
+  wall_model: shell            # 'shell' (sub-grid conductive wall) or 'mesh' (wall as cells)
+  tab_heat_sink: true          # tabs conduct heat to ambient at their far end
 
 tabs:
   - {polarity: pos, edge: y_max, position: 0.25, width: 0.020, thickness: 0.2e-3, length: 0.010, material: al_collector}

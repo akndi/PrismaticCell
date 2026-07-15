@@ -115,6 +115,12 @@ class Enclosure:
     contact_conductance: float  # W/m^2/K, stack<->wall interfacial conductance
     tab_heat_sink: bool = True  # if True, tabs conduct heat to ambient at their far end
                                 # (busbar/terminal heat-sunk near the coolant temperature)
+    # How the enclosure wall is represented thermally:
+    #  - "shell" (default): a sub-grid conductive shell wraps the cavity mesh, giving the wall
+    #    in-plane spreading + through-wall BC + thermal mass WITHOUT resolving its (thin) thickness
+    #    on the grid. Correct for thin walls in large faces (no >100-cell requirement).
+    #  - "mesh": the wall is meshed as volume cells (only resolved where dx/dy/dz < wall_thickness).
+    wall_model: Literal["shell", "mesh"] = "shell"
 
 
 # --------------------------------------------------------------------------- #

@@ -186,7 +186,18 @@ harmonic mean of the two cells' directional conductivities (series resistance).
   attachment control volumes to ambient with conductance `k·w·t/L` (far end heat-sunk near the
   mean coolant temperature). A real terminal heat path; disable for thermally isolated tabs.
 - **Stack↔wall contact** (`enclosure.contact_conductance`): a series interfacial conductance
-  `G = h_c·A` applied on stack↔can-wall control-volume faces.
+  `G = h_c·A` at the wall interface (at can-wall control-volume faces in `mesh` mode, or in the
+  boundary BC series in `shell` mode).
+- **Enclosure wall** (`enclosure.wall_model`, default `shell`): the thin can wall is represented
+  as a **sub-grid conductive shell** wrapping the cavity boundary rather than resolved as volume
+  cells (which would need dx,dy,dz < wall thickness — impractical for a 0.8 mm wall in a 150 mm
+  face). The shell adds: (i) **in-plane wall conduction** `G = k_w t_w·(transverse/spacing)`
+  between adjacent boundary cells on every face (lateral spreading + a metal path to the cooled
+  faces), (ii) a **through-wall + contact series resistance** `t_w/k_w + 1/h_c` in each external
+  BC, and (iii) **wall thermal mass** `ρc_w t_w·A` on the boundary cells. Corner cells belong to
+  multiple faces, so the shell is continuous around edges. Set `wall_model: mesh` to instead mesh
+  the wall as volume cells (only resolved where the grid is fine enough). Assumes the wall is thin
+  vs the cell (lumped wall/surface-cell temperature; exact in the good-contact limit).
 
 Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere; stack↔wall via a
 contact conductance; tab heat-loss path), **convection** (external Newton cooling; internal gaps

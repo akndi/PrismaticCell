@@ -87,14 +87,12 @@ def test_steady_converges_and_is_monotonic(small_cfg):
 def test_contact_conductance_raises_stack_temperature(small_cfg):
     """A poorer stack<->wall contact traps heat -> higher peak temperature.
 
-    Needs nz fine enough to resolve the can wall (dz < wall_thickness) so REGION_CAN cells
-    exist for the contact interface.
+    With the default wall shell the contact resistance is applied in the boundary BC series on
+    every external face, so the effect is present at any mesh resolution.
     """
     import copy
-    base = copy.deepcopy(small_cfg)
-    base.mesh.nx, base.mesh.ny, base.mesh.nz = 6, 6, 12   # resolve the top/bottom wall in z
-    cfg_lo = copy.deepcopy(base); cfg_lo.enclosure.contact_conductance = 20.0
-    cfg_hi = copy.deepcopy(base); cfg_hi.enclosure.contact_conductance = 1e6
+    cfg_lo = copy.deepcopy(small_cfg); cfg_lo.enclosure.contact_conductance = 20.0
+    cfg_hi = copy.deepcopy(small_cfg); cfg_hi.enclosure.contact_conductance = 1e6
     assert run(cfg_lo).T_max[-1] > run(cfg_hi).T_max[-1]
 
 
@@ -104,3 +102,32 @@ def test_tab_heat_sink_lowers_temperature(small_cfg):
     cfg_off = copy.deepcopy(small_cfg); cfg_off.enclosure.tab_heat_sink = False
     cfg_on = copy.deepcopy(small_cfg); cfg_on.enclosure.tab_heat_sink = True
     assert run(cfg_on).T_max[-1] < run(cfg_off).T_max[-1]
+
+
+def test_wall_shell_conserves_energy_and_spreads(small_cfg):
+    """The sub-grid wall shell conserves energy and a conductive wall spreads heat.
+
+    Side-face-only cooling exposes the wall conduction path: a conductive metal shell reaches a
+    cooled face and lowers both the peak temperature and the in-plane gradient vs an insulating
+    wall (which removes the spreading path).
+    """
+    import copy
+    from prismaticcell.config import Cooling, FaceBC
+    base = copy.deepcopy(small_cfg)
+    base.cooling = Cooling(y_max=FaceBC("convection", h=60.0, t_inf=298.15))
+    base.enclosure.contact_conductance = 1e5      # good contact -> isolate the conduction path
+
+    def run_scaled(scale):
+        cfg = copy.deepcopy(base)
+        cfg.enclosure.wall_model = "shell"
+        cfg.materials["can_al"].k_in *= scale
+        cfg.materials["can_al"].k_through *= scale
+        return run(cfg)
+
+    conductive = run_scaled(1.0)
+    insulating = run_scaled(0.01)
+    assert abs(conductive.energy_balance["closure_rel"]) < 1e-6
+    dT_cond = conductive.T_max[-1] - conductive.T_min[-1]
+    dT_ins = insulating.T_max[-1] - insulating.T_min[-1]
+    assert dT_cond < dT_ins                        # conductive shell spreads -> smaller gradient
+    assert conductive.T_max[-1] < insulating.T_max[-1]

@@ -22,8 +22,10 @@ Control volumes = full 3-D structured grid → one ECM per active control volume
 - **3-D anisotropic thermal solver** — finite-volume, transient (implicit) and steady-state,
   with independent per-face boundary conditions on the top, bottom and four side faces. Heat
   transfer covers **conduction** (anisotropic, everywhere), **convection** (external Newton
-  cooling), and **radiation** (per-face `emissivity`, linearized Stefan–Boltzmann). Internal gaps
-  are effective-conduction media (no resolved fluid flow).
+  cooling), and **radiation** (per-face `emissivity`, linearized Stefan–Boltzmann about the film
+  temperature). The thin can wall is a **sub-grid conductive shell** (lateral spreading + a metal
+  path to the cooled faces + wall mass) so it contributes without needing >100 in-plane cells;
+  tabs carry electrical *and* thermal resistance. Internal gaps are effective-conduction media.
 - **Two collector fidelities** (`solver.collector_model`) — `planar` (2.5-D: one shared foil
   potential per jellyroll; fast) or `layered` (full 3-D collector: a separate foil potential per
   through-thickness stack layer, parallel at the tabs — resolves through-thickness potential

@@ -90,6 +90,16 @@ class ThermalOperator:
 
         region = np.ascontiguousarray(geom.region)
         gc = float(getattr(geom, "contact_conductance", 0.0))
+        # Sub-grid wall shell: the enclosure wall wraps the cavity boundary as a conductive skin.
+        wall_t = float(getattr(geom, "wall_thickness", 0.0))
+        wall_k = float(getattr(geom, "wall_k", 0.0))
+        wall_rhocp = float(getattr(geom, "wall_rhocp", 0.0))
+        shell = wall_t > 0.0 and wall_k > 0.0
+        # Extra series resistance-area [K*m^2/W] from stack->wall contact and through-wall
+        # conduction, added to every external-face BC when the shell is active.
+        shell_R_area = 0.0
+        if shell:
+            shell_R_area = wall_t / wall_k + (1.0 / gc if gc > 0.0 else 0.0)
 
         def _add_interior(k, lo_idx, hi_idx, area, dist, reg_lo, reg_hi):
             kh = _harmonic(k[0], k[1])
@@ -155,8 +165,12 @@ class ThermalOperator:
                 h_rad = 0.0
             g_rad = h_rad * area
 
+            # Through-wall + contact series resistance (per cell) when the shell is active.
+            r_series = (half_dist / np.maximum(k_norm, 1e-300)) / area + shell_R_area / area
+
             if kind == "dirichlet":
-                g_bc = np.asarray(k_norm * area / half_dist, dtype=np.float64)
+                # fixed temperature at the OUTER wall surface, through the shell + half-cell
+                g_bc = np.asarray(1.0 / r_series, dtype=np.float64)
                 diag_bc[cell_idx] += g_bc
                 b_bc[cell_idx] += g_bc * bc.t_inf
                 g_amb[cell_idx] += g_bc
@@ -175,8 +189,8 @@ class ThermalOperator:
             g_surface = g_film + g_rad
             if np.isscalar(g_surface) and g_surface <= 0.0:
                 return                                            # adiabatic / pure-flux, no ambient path
-            r_cond = half_dist / np.maximum(k_norm, 1e-300)       # half-cell conduction resistance
-            g_bc = 1.0 / (r_cond / area + 1.0 / g_surface)
+            # series: half-cell conduction (+ shell contact/through-wall) then surface exchange
+            g_bc = 1.0 / (r_series + 1.0 / g_surface)
             g_bc = np.asarray(g_bc, dtype=np.float64)
             diag_bc[cell_idx] += g_bc
             b_bc[cell_idx] += g_bc * bc.t_inf
@@ -197,6 +211,37 @@ class ThermalOperator:
                     area_y, dy / 2.0)
         _apply_face(cooling.y_max, idx[:, -1, :].ravel(), ky[:, -1, :].ravel(),
                     area_y, dy / 2.0)
+
+        # --- Sub-grid wall shell: in-plane wall conduction (spreading + a metal path to the
+        #     cooled faces) + wall thermal mass, on the cavity-boundary cells (PHYSICS §5). ---
+        M_wall = np.zeros(N)
+        if shell:
+            gwt = wall_k * wall_t   # wall sheet conductance base [W/K] (× transverse/spacing)
+
+            def _add_pair(p, q, g):
+                rows.append(p); cols.append(p); vals.append(np.full(p.size, g))
+                rows.append(q); cols.append(q); vals.append(np.full(q.size, g))
+                rows.append(p); cols.append(q); vals.append(np.full(p.size, -g))
+                rows.append(q); cols.append(p); vals.append(np.full(q.size, -g))
+
+            def _shell_face(cells2d, g0, g1):
+                if cells2d.shape[0] > 1:
+                    _add_pair(cells2d[:-1, :].ravel(), cells2d[1:, :].ravel(), g0)
+                if cells2d.shape[1] > 1:
+                    _add_pair(cells2d[:, :-1].ravel(), cells2d[:, 1:].ravel(), g1)
+
+            _shell_face(idx[:, :, 0],  gwt * dy / dx, gwt * dx / dy)   # bottom (z=min)
+            _shell_face(idx[:, :, -1], gwt * dy / dx, gwt * dx / dy)   # top (z=max)
+            _shell_face(idx[0, :, :],  gwt * dz / dy, gwt * dy / dz)   # x_min
+            _shell_face(idx[-1, :, :], gwt * dz / dy, gwt * dy / dz)   # x_max
+            _shell_face(idx[:, 0, :],  gwt * dz / dx, gwt * dx / dz)   # y_min
+            _shell_face(idx[:, -1, :], gwt * dz / dx, gwt * dx / dz)   # y_max
+
+            mw = wall_rhocp * wall_t
+            Mw3 = M_wall.reshape(nx, ny, nz)
+            Mw3[:, :, 0] += mw * area_z; Mw3[:, :, -1] += mw * area_z
+            Mw3[0, :, :] += mw * area_x; Mw3[-1, :, :] += mw * area_x
+            Mw3[:, 0, :] += mw * area_y; Mw3[:, -1, :] += mw * area_y
 
         # Tab conduction-to-ambient heat loss (PHYSICS §5): the tab's far end is heat-sunk near
         # the coolant temperature. Distribute each polarity's tab thermal conductance over its
@@ -240,7 +285,7 @@ class ThermalOperator:
         ).tocsr()
 
         V = grid.volume()
-        M = np.ascontiguousarray(geom.rho_cp, dtype=np.float64).ravel() * V
+        M = np.ascontiguousarray(geom.rho_cp, dtype=np.float64).ravel() * V + M_wall
 
         return cls(A=A, b_bc=b_bc, M=M, V=V,
                    g_amb=g_amb, gt_amb=gt_amb, q_flux_out=q_flux_out)

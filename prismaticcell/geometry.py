@@ -80,6 +80,11 @@ class Geometry:
     g_tab_neg: float = 0.0             # S, total physical conductance of the -tab(s)
     tab_heat_cond_pos: float = 0.0     # W/K, +tab conduction to ambient (thermal loss path)
     tab_heat_cond_neg: float = 0.0     # W/K, -tab conduction to ambient
+    # Sub-grid wall shell (wall_model="shell"): the enclosure wall wraps the cavity boundary as a
+    # conductive skin instead of being meshed. Zero when meshed as volume cells or no wall.
+    wall_thickness: float = 0.0        # m, shell thickness
+    wall_k: float = 0.0                # W/m/K, shell in-plane conductivity
+    wall_rhocp: float = 0.0            # J/m^3/K, shell volumetric heat capacity
 
     @property
     def n_active(self) -> int:
@@ -95,7 +100,11 @@ def _role_layer(layers, role):
 
 def build_geometry(cfg: SimConfig) -> Geometry:
     """Construct the full :class:`Geometry` from a validated ``SimConfig``."""
-    wall = cfg.enclosure.wall_thickness
+    wall_real = cfg.enclosure.wall_thickness
+    shell = cfg.enclosure.wall_model == "shell"
+    # In "shell" mode the wall is NOT meshed (it wraps the cavity as a sub-grid skin), so it
+    # contributes no mesh thickness; in "mesh" mode it occupies volume cells at the box edge.
+    wall = 0.0 if shell else wall_real
     clr = cfg.assembly.wall_clearance
     gap = cfg.assembly.inter_gap
     rolls_cfg = cfg.assembly.jellyrolls
@@ -310,6 +319,9 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         contact_conductance=cfg.enclosure.contact_conductance,
         g_tab_pos=g_tab_pos, g_tab_neg=g_tab_neg,
         tab_heat_cond_pos=tab_heat_pos, tab_heat_cond_neg=tab_heat_neg,
+        wall_thickness=(wall_real if shell else 0.0),
+        wall_k=(can_mat.k_in if shell else 0.0),
+        wall_rhocp=(can_mat.density * can_mat.cp if shell else 0.0),
     )
 
 
