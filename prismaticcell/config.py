@@ -233,6 +233,7 @@ class SimConfig:
     load: Load
     solver: Solver
     t_init: float = 298.15      # K, initial uniform temperature
+    soc_init: float = 1.0       # initial state of charge (uniform), 0..1
     data_root: str = "."        # base dir for resolving relative CSV table paths
 
     # ---- loading / validation ------------------------------------------- #
