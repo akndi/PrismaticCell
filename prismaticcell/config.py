@@ -349,7 +349,12 @@ def _build(tp: Any, value: Any) -> Any:
             if value is None:
                 return None
             return _build(a, value)
-    # Material dict special-case handled via Dict[str, Material] above; scalars pass through
+    # Scalar coercion. YAML 1.1 (PyYAML) parses unsigned-exponent floats like "3.5e7" as
+    # strings; coerce numeric-typed fields so such values still load correctly.
+    if tp is float and isinstance(value, (str, int)):
+        return float(value)
+    if tp is int and isinstance(value, str):
+        return int(value)
     return value
 
 

@@ -7,14 +7,14 @@ materials:
     cp: 900.0              # J/kg/K
     k_through: 238.0       # W/m/K
     k_in: 238.0
-    sigma_elec: 3.5e7      # S/m
+    sigma_elec: 3.5e+7      # S/m
 
   cu_collector:            # copper anode current-collector foil
     density: 8960.0
     cp: 385.0
     k_through: 398.0
     k_in: 398.0
-    sigma_elec: 5.96e7
+    sigma_elec: 5.96e+7
 
   lfp_cathode:             # LFP composite coating (electrode + binder + electrolyte, effective)
     density: 2200.0
