@@ -177,7 +177,9 @@ harmonic mean of the two cells' directional conductivities (series resistance).
 - **Radiation** (any non-Dirichlet face with `emissivity > 0`): `q_rad = εσ(T_s⁴ − T_∞⁴)`,
   linearized as `h_rad = 4εσT_m³` about the **mean film temperature** `T_m=(T_s+T_∞)/2` (the
   transient/steady drivers re-linearize each step/iteration from the current surface temperature,
-  giving <0.6% error to ΔT≈80 K). If no surface estimate is available it falls back to
+  giving <0.6% error to ΔT≈50 K and <1.4% to ΔT≈80 K, vs 5–22% for the naive about-T∞ form).
+  Radiation is not applied on Dirichlet faces (the surface temperature is already pinned there).
+  If no surface estimate is available it falls back to
   linearizing about `T_∞` (exact at ΔT=0, otherwise conservative — over-predicts T). Added **in
   parallel** with the convective film, both in series with the half-cell conduction. Assumes a
   **gray-diffuse surface with view factor 1** to large isothermal surroundings at `T_∞` (valid
@@ -196,8 +198,18 @@ harmonic mean of the two cells' directional conductivities (series resistance).
   faces), (ii) a **through-wall + contact series resistance** `t_w/k_w + 1/h_c` in each external
   BC, and (iii) **wall thermal mass** `ρc_w t_w·A` on the boundary cells. Corner cells belong to
   multiple faces, so the shell is continuous around edges. Set `wall_model: mesh` to instead mesh
-  the wall as volume cells (only resolved where the grid is fine enough). Assumes the wall is thin
-  vs the cell (lumped wall/surface-cell temperature; exact in the good-contact limit).
+  the wall as volume cells (only resolved where the grid is fine enough).
+
+  *Shell approximations (bounded):* the wall shares the outer cavity-cell temperature node — no
+  separate wall DOF — so the wall's spreading and mass are not attenuated by the stack↔wall
+  contact drop. This is excellent when the contact is good and the wall is thin (baseline wall
+  Biot `h·t_w/k_w ≈ 10⁻⁴`, near-isothermal Al), but under **poor contact / low-k walls** the wall
+  is physically decoupled from the near-surface cell and the lumped model over-couples its
+  spreading/mass to the interior — use `wall_model: mesh` (with a fine grid) for that regime.
+  Shell external area and mass use the cavity (inner) surface, a ~t_w/L (<1%) under-count. The
+  shell uses a single wall conductivity (`k_in` of the enclosure material) — no multi-material or
+  variable-thickness wall. The contact resistance is applied on every external face (as in mesh
+  mode), including faces backed by the clearance gap.
 
 Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere; stack↔wall via a
 contact conductance; tab heat-loss path), **convection** (external Newton cooling; internal gaps

@@ -56,8 +56,9 @@ class ThermalOperator:
 
         ``t_surf_field`` (nx,ny,nz), if given, is the current temperature estimate used to
         linearize radiation about the mean film temperature Tm=(Ts+T_inf)/2 (h_rad=4εσTm³),
-        which is far more accurate than linearizing about T_inf at large ΔT. When omitted,
-        radiation linearizes about T_inf (exact at ΔT=0, conservative/over-predicts T).
+        far more accurate than linearizing about T_inf at large ΔT (<0.6% error to ΔT~50 K,
+        <1.4% to 80 K). When omitted, radiation linearizes about T_inf (exact at ΔT=0,
+        conservative/over-predicts T).
         """
         grid = geom.grid
         nx, ny, nz = grid.nx, grid.ny, grid.nz

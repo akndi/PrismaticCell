@@ -132,7 +132,7 @@ def run(cfg: SimConfig) -> Result:
     T_field = np.full((nx, ny, nz), cfg.t_init)
 
     if cfg.solver.mode == "steady":
-        return _run_steady(cfg, geom, model, op, state, T_field, active_ijk, cap_act)
+        return _run_steady(cfg, geom, model, op, state, T_field, active_ijk)
 
     dt = cfg.solver.dt
     t_end = cfg.solver.t_end
@@ -229,7 +229,7 @@ def _steady_dc_rc(model, state, j_area_active, T_act):
         state.rc_u[p] = j_area_active * Rp
 
 
-def _run_steady(cfg, geom, model, op, state, T_field, active_ijk, cap_act) -> Result:
+def _run_steady(cfg, geom, model, op, state, T_field, active_ijk) -> Result:
     """Steady operating point via an under-relaxed, RC-polarized coupled fixed point.
 
     The map T -> solve_steady(q(network(T), T)) can have Lipschitz constant > 1 at stiff
@@ -264,10 +264,13 @@ def _run_steady(cfg, geom, model, op, state, T_field, active_ijk, cap_act) -> Re
         q_vol = _heat_map(geom, model, state, sol, T_iter, active_ijk)
         T_new = solve_steady(op, q_vol).reshape(nx, ny, nz)
         dT = float(np.max(np.abs(T_new - T_iter)))
-        T_iter = T_iter + omega * (T_new - T_iter)          # under-relaxed update
         if dT < cfg.solver.coupling_tol:
+            # accept the exact solve output (not the relaxed blend) so the reported energy
+            # balance closes to machine precision (removed(T_new) == q_step identically)
+            T_iter = T_new
             converged = True
             break
+        T_iter = T_iter + omega * (T_new - T_iter)          # under-relaxed update
     if not converged:
         warnings.warn(
             "steady coupled fixed point did not converge to solver.coupling_tol in "
