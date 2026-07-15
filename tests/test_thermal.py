@@ -85,3 +85,29 @@ def test_transient_relaxes_to_steady():
     for _ in range(4000):
         T = step_transient(op, T, q, dt=1.0)
     assert np.allclose(T, T_steady, rtol=1e-4)
+
+
+def test_radiation_only_face_energy_balance():
+    """An adiabatic-but-emissive face still rejects heat by radiation; gen == removed."""
+    from prismaticcell.config import SIGMA_SB
+    nx, ny, nz, dx = 5, 5, 5, 2e-3
+    geom = make_uniform_geometry(nx, ny, nz, dx, k=3.0, rho_cp=2e6)
+    cooling = Cooling(top=FaceBC("adiabatic", t_inf=298.15, emissivity=0.85))
+    op = ThermalOperator.assemble(geom, cooling)
+    q = 4000.0
+    T = solve_steady(op, np.full((nx, ny, nz), q)).reshape(nx, ny, nz)
+    V_total = nx * ny * nz * dx**3
+    assert np.isclose(q * V_total, boundary_heat_removed(op, T), rtol=1e-6)
+    assert T.min() > 298.15
+
+
+def test_emissivity_augments_convection():
+    """Adding emissivity to a convective face increases heat removal (lower steady T)."""
+    nx, ny, nz, dx = 5, 5, 5, 2e-3
+    geom = make_uniform_geometry(nx, ny, nz, dx, k=3.0, rho_cp=2e6)
+    op_conv = ThermalOperator.assemble(geom, Cooling(top=FaceBC("convection", h=10.0, t_inf=298.15)))
+    op_both = ThermalOperator.assemble(geom, Cooling(top=FaceBC("convection", h=10.0, t_inf=298.15, emissivity=0.9)))
+    q = np.full((nx, ny, nz), 5000.0)
+    T_conv = solve_steady(op_conv, q)
+    T_both = solve_steady(op_both, q)
+    assert T_both.max() < T_conv.max()

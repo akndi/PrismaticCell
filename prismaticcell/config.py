@@ -20,6 +20,7 @@ import yaml
 # Physical constants (universal — not tunable model parameters)
 # --------------------------------------------------------------------------- #
 R_GAS = 8.314462618          # J/mol/K, universal gas constant
+SIGMA_SB = 5.670374419e-8    # W/m^2/K^4, Stefan-Boltzmann constant
 T_ABS_ZERO = 0.0             # K
 KELVIN_0C = 273.15           # K
 
@@ -174,6 +175,8 @@ class FaceBC:
     h: float = 0.0              # W/m^2/K, convective coefficient (convection)
     t_inf: float = 298.15       # K, ambient/coolant/wall temperature
     flux: float = 0.0           # W/m^2, prescribed flux (neumann; +out)
+    emissivity: float = 0.0     # 0..1 surface emissivity; >0 adds linearized radiation to t_inf
+                                # on any non-dirichlet face (thermal-radiation heat path)
 
 
 @dataclass
@@ -214,6 +217,11 @@ class Solver:
     newton_tol: float = 1e-9    # convergence tol on the electro network solve
     newton_max: int = 50        # max Newton iterations for the network
     linear_solver: Literal["direct", "cg"] = "direct"
+    # Collector network fidelity: "planar" = one shared 2-D foil potential per jellyroll
+    # (2.5-D; fast); "layered" = a separate 2-D foil potential per through-thickness stack
+    # layer, all in parallel at the tabs (full 3-D collector; resolves through-thickness
+    # potential/current gradients driven by the 3-D temperature field).
+    collector_model: Literal["planar", "layered"] = "planar"
 
 
 # --------------------------------------------------------------------------- #

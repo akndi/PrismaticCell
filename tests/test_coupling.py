@@ -53,3 +53,12 @@ def test_steady_mode_energy_balance(small_cfg):
     res = run(cfg)
     eb = res.energy_balance
     assert abs(eb["closure_rel"]) < 1e-3
+
+
+def test_layered_collector_energy_closure(small_cfg):
+    """The full 3-D (layered) collector model also closes the energy balance."""
+    cfg = small_cfg
+    cfg.solver.collector_model = "layered"
+    res = run(cfg)
+    assert abs(res.energy_balance["closure_rel"]) < 1e-6
+    assert res.v_terminal[-1] < res.v_terminal[0] or res.soc_mean[-1] < res.soc_mean[0]

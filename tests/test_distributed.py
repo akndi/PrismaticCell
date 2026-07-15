@@ -92,3 +92,67 @@ def test_current_concentrates_near_tabs(baseline_cfg):
     j_far = np.nanmean([sol.j_area[i, j, :][geom.active_mask[i, j, :]].mean()
                         for (i, j) in roll.columns if j <= min(tab_js)])
     assert j_edge >= j_far          # near-tab current >= far-from-tab
+
+
+def _thermal_gradient_field(geom, base=298.15, amp=25.0):
+    import numpy as np
+    T = np.full((geom.grid.nx, geom.grid.ny, geom.grid.nz), base)
+    kc = (geom.grid.nz - 1) / 2.0
+    for k in range(geom.grid.nz):
+        T[:, :, k] += amp * np.exp(-((k - kc) / 2.0) ** 2)   # hotter inner layers
+    return T
+
+
+def test_layered_charge_conservation(baseline_cfg):
+    cfg = baseline_cfg
+    cfg.mesh.nx, cfg.mesh.ny, cfg.mesh.nz = 8, 10, 6
+    geom, model = build_geometry(cfg), ECMModel.from_config(cfg)
+    n = int(geom.active_mask.sum())
+    state = ECMState(soc=np.full(n, 0.6), rc_u=np.zeros((model.n_rc, n)))
+    T = _thermal_gradient_field(geom)
+    sol = solve_network(geom, model, state, T, 40.0, mode="current", tol=1e-9, maxiter=50,
+                        collector_model="layered")
+    assert np.isclose(sol.i_cv.sum(), 40.0, rtol=1e-4)
+    assert np.isclose(sol.i_terminal, 40.0, rtol=1e-4)
+
+
+def test_layered_agrees_with_planar_for_conductive_foils(baseline_cfg):
+    """With the (very conductive) real Al/Cu foils, layered ~ planar terminal voltage."""
+    cfg = baseline_cfg
+    cfg.mesh.nx, cfg.mesh.ny, cfg.mesh.nz = 8, 10, 6
+    geom, model = build_geometry(cfg), ECMModel.from_config(cfg)
+    n = int(geom.active_mask.sum())
+    state = ECMState(soc=np.full(n, 0.6), rc_u=np.zeros((model.n_rc, n)))
+    T = _thermal_gradient_field(geom)
+    sp_ = solve_network(geom, model, state, T, 40.0, mode="current", collector_model="planar")
+    sl_ = solve_network(geom, model, state, T, 40.0, mode="current", collector_model="layered")
+    assert abs(sp_.v_terminal - sl_.v_terminal) < 5e-3
+
+
+def test_layered_resolves_through_thickness_potential(baseline_cfg):
+    """Planar shares Δφ across z within a column; layered can differ layer-to-layer.
+
+    With reduced foil conductance + a z thermal gradient, the layered model develops a
+    genuine through-thickness Δφ variation that the planar model cannot represent.
+    """
+    cfg = baseline_cfg
+    cfg.assembly.jellyrolls = cfg.assembly.jellyrolls[:1]
+    cfg.mesh.nx, cfg.mesh.ny, cfg.mesh.nz = 6, 8, 6
+    # thin/resistive foils so the foil IR drop matters
+    cfg.materials["al_collector"].sigma_elec = 3.5e4
+    cfg.materials["cu_collector"].sigma_elec = 5.96e4
+    geom, model = build_geometry(cfg), ECMModel.from_config(cfg)
+    n = int(geom.active_mask.sum())
+    state = ECMState(soc=np.full(n, 0.6), rc_u=np.zeros((model.n_rc, n)))
+    T = _thermal_gradient_field(geom, amp=30.0)
+    sp_ = solve_network(geom, model, state, T, 60.0, mode="current", collector_model="planar")
+    sl_ = solve_network(geom, model, state, T, 60.0, mode="current", collector_model="layered")
+
+    roll = geom.rolls[0]
+    # pick a column with several active z-cells
+    col = max(roll.columns, key=lambda c: len(roll.col_zcells[c]))
+    ks = roll.col_zcells[col]
+    dphi_planar = np.array([sp_.dphi_field[col[0], col[1], k] for k in ks])
+    dphi_layered = np.array([sl_.dphi_field[col[0], col[1], k] for k in ks])
+    assert dphi_planar.max() - dphi_planar.min() < 1e-9        # planar: identical across z
+    assert dphi_layered.max() - dphi_layered.min() > 1e-4      # layered: genuinely varies in z

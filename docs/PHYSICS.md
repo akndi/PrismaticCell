@@ -123,6 +123,15 @@ Assembled each timestep as a coupled sparse system (two foil Laplacians + per-CV
 terminal constraint), solved by Newton / fixed-point because `U_ocv`, `R` depend on state.
 Mesh = 1×1 reduces exactly to a single lumped ECM (validation limit).
 
+**Collector fidelity (`solver.collector_model`):**
+- `planar` (default, 2.5-D): one shared `φ⁺,φ⁻` per jellyroll; all through-thickness stack layers
+  in a column share `Δφ(x,y)` but each 3-D CV still carries its own SOC/T/RC state and current
+  `j_k=(U_ocv−Σu−Δφ)/R0(T_k)`, so through-thickness current variation from `R0(T)` is captured.
+- `layered` (full 3-D collector): each stack layer `k` gets its **own** `φ⁺[k],φ⁻[k]` (2-D each),
+  carrying `1/n_layers` of the foil sheet conductance, all joined **in parallel at the tabs**. This
+  additionally resolves the through-thickness *potential* gradient (foil IR differing layer-to-
+  layer). Reduces to `planar` in the limit of highly conductive foils. Charge is conserved in both.
+
 ---
 
 ## 4. Heat generation (per CV → thermal source map)
@@ -165,6 +174,14 @@ harmonic mean of the two cells' directional conductivities (series resistance).
 - **Convection:** `−k ∂T/∂n = h (T_s − T_∞)`
 - **Dirichlet:** `T_s = T_wall` (constant-temperature cooling)
 - **Neumann:** `−k ∂T/∂n = q″` (fixed flux; `q″=0` → adiabatic)
+- **Radiation** (any non-Dirichlet face with `emissivity > 0`): `q_rad = εσ(T_s⁴ − T_∞⁴)`,
+  linearized about the sink as `h_rad = 4εσT_∞³` and added **in parallel** with the convective
+  film (both in series with the half-cell conduction). Valid for moderate ΔT; for large ΔT the
+  coefficient can be iterated on the surface temperature.
+
+Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere), **convection**
+(external Newton cooling; internal gaps are effective-conduction media, not resolved fluid flow),
+and **radiation** (external faces, linearized Stefan–Boltzmann).
 
 ### 5.2 Steady state
 

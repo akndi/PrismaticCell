@@ -102,6 +102,8 @@ class NetworkSolution:
     v_terminal: float                 # cell terminal voltage [V] (Vp - Vn, Vn grounded to 0)
     i_terminal: float                 # total cell current [A] (== applied for galvanostatic)
     q_ohm_vol: np.ndarray             # (nx,ny,nz) foil ohmic heat density [W/m^3]
+    dphi_field: np.ndarray = None     # (nx,ny,nz) local stack Δφ = φ⁺-φ⁻ per active CV [V]
+                                      # (per-column in "planar", per-CV in "layered")
 
 
 def _active_index_field(geom: Geometry) -> np.ndarray:
@@ -127,6 +129,7 @@ def solve_network(
     mode: str = "current",
     tol: float = 1e-9,
     maxiter: int = 50,
+    collector_model: str = "planar",
 ) -> NetworkSolution:
     """Solve the current-collector potential network (PHYSICS §3).
 
@@ -138,10 +141,15 @@ def solve_network(
     T_field : (nx,ny,nz) temperature field [K]; active CVs read their local T.
     applied : current [A] if ``mode == "current"`` else terminal voltage [V].
     mode : "current" (galvanostatic) or "voltage" (potentiostatic).
+    collector_model : "planar" (one shared 2-D foil potential per jellyroll; 2.5-D) or
+        "layered" (a separate 2-D foil potential per through-thickness stack layer, all in
+        parallel at the tabs -> full 3-D collector resolving through-thickness gradients).
     tol, maxiter : API compatibility; the affine system is solved exactly in one solve.
     """
     if mode not in ("current", "voltage"):
         raise ValueError(f"mode must be 'current' or 'voltage', got {mode!r}")
+    if collector_model not in ("planar", "layered"):
+        raise ValueError(f"collector_model must be 'planar' or 'layered', got {collector_model!r}")
 
     grid = geom.grid
     nx, ny, nz = grid.nx, grid.ny, grid.nz
@@ -162,6 +170,9 @@ def solve_network(
             "Network is not terminated: need at least one positive and one negative tab "
             f"node (got {n_pos_nodes} pos, {n_neg_nodes} neg). Check tab edges/positions."
         )
+
+    if collector_model == "layered":
+        return _solve_layered(geom, model, state, T_field, applied, mode=mode)
 
     # ---- per-active-CV state gathered onto (nx,ny,nz) fields --------------------
     aidx = _active_index_field(geom)                 # (nx,ny,nz) active index / -1
@@ -306,6 +317,7 @@ def solve_network(
     j_area = np.zeros((nx, ny, nz))
     i_cv = np.zeros((nx, ny, nz))
     q_ohm_vol = np.zeros((nx, ny, nz))
+    dphi_field = np.zeros((nx, ny, nz))
     vol = grid.volume()
 
     for roll in geom.rolls:
@@ -326,6 +338,7 @@ def solve_network(
                 j_local = (ocv_active[a] - usum[a] - dphi) / r0_active[a]
                 j_area[i, j, k] = j_local
                 i_cv[i, j, k] = j_local * roll.area_eff[i, j, k]
+                dphi_field[i, j, k] = dphi
 
         # foil ohmic heat: split each edge's power to its two endpoint columns,
         # accumulate per column over both foils.
@@ -366,4 +379,183 @@ def solve_network(
         v_terminal=float(v_terminal),
         i_terminal=i_terminal,
         q_ohm_vol=q_ohm_vol,
+        dphi_field=dphi_field,
+    )
+
+
+def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
+    """Full 3-D collector solve (PHYSICS §3, layered variant).
+
+    Instead of one shared 2-D foil potential per jellyroll, each through-thickness stack layer
+    ``k`` gets its OWN pair of 2-D foil potentials ``φ⁺[r,k]``, ``φ⁻[r,k]``. Layers carry a
+    fraction ``1/n_layers`` of the roll's foil sheet conductance and are electrically independent
+    except that every layer's tab nodes connect in PARALLEL to the shared cell terminals. This
+    resolves through-thickness potential/current gradients: a hotter (lower-R0) inner layer draws
+    more current and develops its own foil IR profile. Reduces to ``planar`` when ``nz`` places a
+    single active layer in the roll.
+    """
+    grid = geom.grid
+    nx, ny, nz = grid.nx, grid.ny, grid.nz
+    dx, dy = grid.dx, grid.dy
+    vol = grid.volume()
+    T_field = np.asarray(T_field, dtype=np.float64)
+
+    aidx = _active_index_field(geom)
+    soc = np.asarray(state.soc, dtype=np.float64)
+    n_active = soc.size
+    rc_u = np.asarray(state.rc_u, dtype=np.float64)
+    usum = rc_u.sum(axis=0) if rc_u.size else np.zeros(n_active)
+    T_active = T_field.ravel(order="C")[np.flatnonzero(geom.active_mask.ravel(order="C"))]
+    ocv_active = np.asarray(model.ocv_v(soc), dtype=np.float64).reshape(-1)
+    r0_active = np.asarray(model.r0_area(soc, T_active), dtype=np.float64).reshape(-1)
+    if np.any(r0_active <= 0.0):
+        raise ValueError("r0_area returned a non-positive resistance; check the R0 table/state")
+
+    current_mode = mode == "current"
+    Vn = 0.0
+
+    # active z-layers per roll (roll bbox is uniform in z, so shared across columns)
+    roll_layers = {roll.roll_index: sorted({k for ks in roll.col_zcells.values() for k in ks})
+                   for roll in geom.rolls}
+
+    def is_active(roll, k, c):
+        return (c in roll.col_zcells) and (k in roll.col_zcells[c])
+
+    # ---- DOF layout: φ⁺ then φ⁻ per (roll, layer, column), then Vp -------------
+    pos_dof: Dict[Tuple[int, int, Tuple[int, int]], int] = {}
+    neg_dof: Dict[Tuple[int, int, Tuple[int, int]], int] = {}
+    ndof = 0
+    for roll in geom.rolls:
+        r = roll.roll_index
+        for k in roll_layers[r]:
+            for c in roll.columns:
+                if is_active(roll, k, c):
+                    pos_dof[(r, k, c)] = ndof
+                    ndof += 1
+    for roll in geom.rolls:
+        r = roll.roll_index
+        for k in roll_layers[r]:
+            for c in roll.columns:
+                if is_active(roll, k, c):
+                    neg_dof[(r, k, c)] = ndof
+                    ndof += 1
+    if current_mode:
+        vp_dof = ndof
+        ndof += 1
+        Vp_fixed = None
+    else:
+        vp_dof = None
+        Vp_fixed = float(applied)
+
+    sheet_scale = max(max(r.sheet_cond_pos, r.sheet_cond_neg) for r in geom.rolls)
+    G_tab = TAB_CONDUCTANCE_FACTOR * sheet_scale
+
+    rows: list = []
+    cols: list = []
+    vals: list = []
+    rhs = np.zeros(ndof)
+
+    def add(a, b, v):
+        rows.append(a); cols.append(b); vals.append(v)
+
+    # ---- assemble per-layer foil Laplacians + column coupling + tabs -----------
+    for roll in geom.rolls:
+        r = roll.roll_index
+        nlz = max(len(roll_layers[r]), 1)
+        sc_p = roll.sheet_cond_pos / nlz          # per-layer foil sheet conductance
+        sc_n = roll.sheet_cond_neg / nlz
+        Gx_p, Gy_p = sc_p * (dy / dx), sc_p * (dx / dy)
+        Gx_n, Gy_n = sc_n * (dy / dx), sc_n * (dx / dy)
+        for k in roll_layers[r]:
+            # in-plane 4-neighbour foil coupling within this layer
+            for (i, j) in roll.columns:
+                if not is_active(roll, k, (i, j)):
+                    continue
+                p = pos_dof[(r, k, (i, j))]
+                q = neg_dof[(r, k, (i, j))]
+                for (ni, nj), Gp, Gn in (((i + 1, j), Gx_p, Gx_n), ((i, j + 1), Gy_p, Gy_n)):
+                    if is_active(roll, k, (ni, nj)):
+                        p2 = pos_dof[(r, k, (ni, nj))]
+                        q2 = neg_dof[(r, k, (ni, nj))]
+                        add(p, p, Gp); add(p2, p2, Gp); add(p, p2, -Gp); add(p2, p, -Gp)
+                        add(q, q, Gn); add(q2, q2, Gn); add(q, q2, -Gn); add(q2, q, -Gn)
+                # column source/sink: a single CV per (layer, column)
+                a = aidx[i, j, k]
+                b = roll.area_eff[i, j, k] / r0_active[a]
+                isrc = b * (ocv_active[a] - usum[a])
+                add(p, p, b); add(p, q, -b); rhs[p] += isrc
+                add(q, q, b); add(q, p, -b); rhs[q] += -isrc
+            # tabs: this layer's tab nodes join the SHARED terminals (parallel across layers)
+            for c in roll.tab_pos_nodes:
+                if not is_active(roll, k, c):
+                    continue
+                p = pos_dof[(r, k, c)]
+                add(p, p, G_tab)
+                if current_mode:
+                    add(p, vp_dof, -G_tab); add(vp_dof, p, -G_tab); add(vp_dof, vp_dof, G_tab)
+                else:
+                    rhs[p] += G_tab * Vp_fixed
+            for c in roll.tab_neg_nodes:
+                if not is_active(roll, k, c):
+                    continue
+                q = neg_dof[(r, k, c)]
+                add(q, q, G_tab)
+                rhs[q] += G_tab * Vn
+
+    if current_mode:
+        rhs[vp_dof] += -float(applied)
+
+    A = sp.csr_matrix((vals, (rows, cols)), shape=(ndof, ndof))
+    x = np.atleast_1d(np.asarray(spsolve(A.tocsc(), rhs), dtype=np.float64))
+    Vp = float(x[vp_dof]) if current_mode else Vp_fixed
+    v_terminal = Vp - Vn
+
+    # ---- reconstruct fields ----------------------------------------------------
+    phi_pos: Dict[int, np.ndarray] = {}
+    phi_neg: Dict[int, np.ndarray] = {}
+    j_area = np.zeros((nx, ny, nz))
+    i_cv = np.zeros((nx, ny, nz))
+    q_ohm_vol = np.zeros((nx, ny, nz))
+    dphi_field = np.zeros((nx, ny, nz))
+
+    for roll in geom.rolls:
+        r = roll.roll_index
+        nlz = max(len(roll_layers[r]), 1)
+        sc_p = roll.sheet_cond_pos / nlz
+        sc_n = roll.sheet_cond_neg / nlz
+        Gx_p, Gy_p = sc_p * (dy / dx), sc_p * (dx / dy)
+        Gx_n, Gy_n = sc_n * (dy / dx), sc_n * (dx / dy)
+        pp_sum = np.zeros((nx, ny)); pn_sum = np.zeros((nx, ny)); cnt = np.zeros((nx, ny))
+        for k in roll_layers[r]:
+            for (i, j) in roll.columns:
+                if not is_active(roll, k, (i, j)):
+                    continue
+                pv = x[pos_dof[(r, k, (i, j))]]
+                nv = x[neg_dof[(r, k, (i, j))]]
+                dphi = pv - nv
+                a = aidx[i, j, k]
+                jl = (ocv_active[a] - usum[a] - dphi) / r0_active[a]
+                j_area[i, j, k] = jl
+                i_cv[i, j, k] = jl * roll.area_eff[i, j, k]
+                dphi_field[i, j, k] = dphi
+                pp_sum[i, j] += pv; pn_sum[i, j] += nv; cnt[i, j] += 1.0
+                # per-layer foil ohmic heat, split to endpoint CVs of this layer
+                for (ni, nj), Gp, Gn in (((i + 1, j), Gx_p, Gx_n), ((i, j + 1), Gy_p, Gy_n)):
+                    if is_active(roll, k, (ni, nj)):
+                        dpp = pv - x[pos_dof[(r, k, (ni, nj))]]
+                        dpn = nv - x[neg_dof[(r, k, (ni, nj))]]
+                        pe = Gp * dpp * dpp + Gn * dpn * dpn
+                        q_ohm_vol[i, j, k] += 0.5 * pe / vol
+                        q_ohm_vol[ni, nj, k] += 0.5 * pe / vol
+        pp = np.full((nx, ny), np.nan); pn = np.full((nx, ny), np.nan)
+        m = cnt > 0
+        pp[m] = pp_sum[m] / cnt[m]                  # thickness-averaged (for plotting)
+        pn[m] = pn_sum[m] / cnt[m]
+        phi_pos[r] = pp
+        phi_neg[r] = pn
+
+    return NetworkSolution(
+        j_area=j_area, i_cv=i_cv, phi_pos=phi_pos, phi_neg=phi_neg,
+        v_terminal=float(v_terminal), i_terminal=float(i_cv.sum()),
+        q_ohm_vol=q_ohm_vol, dphi_field=dphi_field,
     )

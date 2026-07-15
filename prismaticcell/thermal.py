@@ -23,7 +23,7 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-from .config import Cooling, FaceBC
+from .config import Cooling, FaceBC, SIGMA_SB
 from .geometry import Geometry
 
 
@@ -116,23 +116,34 @@ class ThermalOperator:
             half_dist: cell-center-to-face distance [m]
             """
             kind = bc.kind
-            if kind == "adiabatic":
+            # Linearized radiative surface coefficient (about the sink temperature t_inf):
+            #   q_rad = eps*sigma*(Ts^4 - Tinf^4) ~= h_rad*(Ts - Tinf),  h_rad = 4*eps*sigma*Tinf^3
+            # Applied on any non-dirichlet face with emissivity>0 (a real thermal-radiation path).
+            h_rad = (4.0 * bc.emissivity * SIGMA_SB * bc.t_inf**3) if bc.emissivity > 0.0 else 0.0
+            g_rad = h_rad * area
+
+            if kind == "dirichlet":
+                g_bc = np.asarray(k_norm * area / half_dist, dtype=np.float64)
+                diag_bc[cell_idx] += g_bc
+                b_bc[cell_idx] += g_bc * bc.t_inf
+                g_amb[cell_idx] += g_bc
+                gt_amb[cell_idx] += g_bc * bc.t_inf
                 return
+
             if kind == "neumann":
                 # -k dT/dn = flux  (flux>0 leaves the cell). Heat INTO cell = -flux*area.
                 q_out = bc.flux * area
                 b_bc[cell_idx] += -q_out
                 q_flux_out[cell_idx] += q_out
-                return
-            # convection & dirichlet share a series-conductance-to-ambient form.
-            r_cond = half_dist / np.maximum(k_norm, 1e-300)      # half-cell conduction
-            if kind == "convection":
-                r_film = 1.0 / (bc.h * area) if bc.h > 0.0 else np.inf
-                g_bc = 1.0 / (r_cond / area + r_film)            # series: cond + film
-            elif kind == "dirichlet":
-                g_bc = k_norm * area / half_dist                 # half-cell to fixed node
-            else:  # pragma: no cover - guarded by config Literal
-                raise ValueError(f"unknown BC kind '{kind}'")
+
+            # Surface-to-ambient conductance: convective film and radiation act in PARALLEL,
+            # in SERIES with the half-cell conduction from the cell center to the surface.
+            g_film = bc.h * area if (kind == "convection" and bc.h > 0.0) else 0.0
+            g_surface = g_film + g_rad
+            if np.isscalar(g_surface) and g_surface <= 0.0:
+                return                                            # adiabatic / pure-flux, no ambient path
+            r_cond = half_dist / np.maximum(k_norm, 1e-300)       # half-cell conduction resistance
+            g_bc = 1.0 / (r_cond / area + 1.0 / g_surface)
             g_bc = np.asarray(g_bc, dtype=np.float64)
             diag_bc[cell_idx] += g_bc
             b_bc[cell_idx] += g_bc * bc.t_inf

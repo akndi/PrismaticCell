@@ -20,8 +20,14 @@ Control volumes = full 3-D structured grid → one ECM per active control volume
   through the Al/Cu **current-collector potential fields**, so **tab placement, electrode
   thickness and stack size actually redistribute current, SOC and heat**.
 - **3-D anisotropic thermal solver** — finite-volume, transient (implicit) and steady-state,
-  with independent per-face boundary conditions (convection / fixed-temperature / fixed-flux /
-  adiabatic) on the top, bottom and four side faces.
+  with independent per-face boundary conditions on the top, bottom and four side faces. Heat
+  transfer covers **conduction** (anisotropic, everywhere), **convection** (external Newton
+  cooling), and **radiation** (per-face `emissivity`, linearized Stefan–Boltzmann). Internal gaps
+  are effective-conduction media (no resolved fluid flow).
+- **Two collector fidelities** (`solver.collector_model`) — `planar` (2.5-D: one shared foil
+  potential per jellyroll; fast) or `layered` (full 3-D collector: a separate foil potential per
+  through-thickness stack layer, parallel at the tabs — resolves through-thickness potential
+  gradients). Both conserve charge; `layered` → `planar` in the conductive-foil limit.
 - **Two-way coupling** — Bernardi heat generation (irreversible + reversible + ohmic) feeds the
   thermal solver; the temperature field feeds back into the (Arrhenius) ECM parameters. A real
   closed loop, verified by an energy-conservation test.
@@ -76,10 +82,11 @@ the edge minimizes current-density non-uniformity (`examples/tab_placement_sweep
 
 ## Validation
 
-`python -m pytest` runs 20 checks (PHYSICS §7): 1-D steady conduction vs closed form, lumped-
+`python -m pytest` runs 26 checks (PHYSICS §7): 1-D steady conduction vs closed form, lumped-
 capacitance transient, adiabatic-pulse and steady energy conservation, symmetric-cooling symmetry,
-SOC Coulomb balance, Arrhenius direction, entropy sign, charge conservation, discharge-below-OCV,
-the single-roll lumped limit, and end-to-end two-way-coupling energy closure.
+radiation energy balance, SOC Coulomb balance, Arrhenius direction, entropy sign, charge
+conservation (planar & layered), discharge-below-OCV, the single-roll lumped limit, the layered
+collector's through-thickness potential resolution, and end-to-end two-way-coupling energy closure.
 
 Parameters and data tables are **representative** starting points — replace `data/*.csv` and
 `configs/*.yaml` with your cell's characterization for quantitative design work.

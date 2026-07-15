@@ -92,13 +92,8 @@ def _heat_map(geom: Geometry, model: ECMModel, state: ECMState, sol,
     T_act = T_field[ii, jj, kk]
     soc = state.soc
     ocv = model.ocv_v(soc)
-    # local cell voltage = Δφ across the stack at this column (vectorized per roll)
-    dphi = np.empty_like(soc)
-    roll_of = geom.cell_roll[ii, jj, kk]
-    for r, pp in sol.phi_pos.items():
-        m = roll_of == r
-        if np.any(m):
-            dphi[m] = pp[ii[m], jj[m]] - sol.phi_neg[r][ii[m], jj[m]]
+    # local cell voltage = Δφ across the stack, per active CV (works for planar & layered)
+    dphi = sol.dphi_field[ii, jj, kk]
     i_cv = sol.i_cv[ii, jj, kk]
     # Bernardi decomposition (PHYSICS §4): Q = I(U_ocv - V) - I*T*(dU/dT).
     # Irreversible overpotential heat (dominant; = I^2*R over a cycle):
@@ -154,7 +149,8 @@ def run(cfg: SimConfig) -> Result:
         for _ in range(cfg.solver.max_subiter):
             sol = solve_network(geom, model, state, T_iter, applied,
                                 mode=mode, tol=cfg.solver.newton_tol,
-                                maxiter=cfg.solver.newton_max)
+                                maxiter=cfg.solver.newton_max,
+                                collector_model=cfg.solver.collector_model)
             q_vol = _heat_map(geom, model, state, sol, T_iter, active_ijk)
             T_new = step_transient(op, T_field, q_vol, dt,
                                    linear_solver=cfg.solver.linear_solver
@@ -222,7 +218,8 @@ def _run_steady(cfg, geom, model, op, state, T_field, active_ijk, cap_act) -> Re
     sol = None
     for _ in range(max(cfg.solver.max_subiter, 50)):
         sol = solve_network(geom, model, state, T_iter, applied,
-                            mode=mode, tol=cfg.solver.newton_tol, maxiter=cfg.solver.newton_max)
+                            mode=mode, tol=cfg.solver.newton_tol, maxiter=cfg.solver.newton_max,
+                            collector_model=cfg.solver.collector_model)
         q_vol = _heat_map(geom, model, state, sol, T_iter, active_ijk)
         T_new = solve_steady(op, q_vol).reshape(nx, ny, nz)
         if np.max(np.abs(T_new - T_iter)) < cfg.solver.coupling_tol:
