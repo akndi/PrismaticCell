@@ -81,10 +81,10 @@ config-supplied tables/coefficients. `U_ocv` from the OCV table; entropic term b
 ### 2.3 State of charge (per CV)
 
 ```
-dz_k/dt = − i_k A_cv / (3600 · Q_cv(T_k))
+dz_k/dt = − i_k / (3600 · Q_cv(T_k))            (i_k in A, Q_cv in Ah)
 ```
 
-`Q_cv` is the areal capacity of one CV (Ah), derived from total capacity / (nx·ny). SOC diverges
+`Q_cv` is the capacity of one CV (Ah), derived from total capacity / (nx·ny). SOC diverges
 CV-to-CV → non-uniform utilization (near-tab vs far-tab) is a first-class output.
 
 ---
@@ -130,10 +130,14 @@ Mesh = 1×1 reduces exactly to a single lumped ECM (validation limit).
 Bernardi decomposition, per CV, plus foil ohmic and contact heating:
 
 ```
-q_ecm,k  = i_k (U_ocv,k − v_k)              [irreversible: overpotential heat, ≥ 0]
-q_rev,k  = i_k T_k (dU/dT)(z_k)             [reversible/entropic, sign varies]
-q_ohm,k  = σ⁺ t⁺ |∇φ⁺_k|² + σ⁻ t⁻ |∇φ⁻_k|²  [foil Joule heat]
+q_ecm,k  = i_k (U_ocv,k − v_k)              [irreversible overpotential heat; = i²R over a cycle]
+q_rev,k  = − i_k T_k (dU/dT)(z_k)           [reversible/entropic; leading minus is the Bernardi sign]
+q_ohm,k  = σ⁺ t⁺ |∇φ⁺_k|² + σ⁻ t⁻ |∇φ⁻_k|²  [foil Joule heat, ≥ 0]
 ```
+
+Full Bernardi form: `Q = I(U_ocv − V) − I·T·(dU/dT)`, with `I` discharge-positive. The entropic
+coefficient `dU/dT` is stored directly in the entropy table, so the minus sign lives in the
+equation. (For LFP mid-SOC, `dU/dT < 0`, so discharge is mildly exothermic reversibly.)
 
 Total CV heat `Q_k = q_ecm,k + q_rev,k + q_ohm,k` (W), converted to a volumetric density
 `q'''_k = Q_k / V_cv` and injected into the thermal solver. Tab and contact-resistance Joule

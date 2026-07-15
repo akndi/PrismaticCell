@@ -92,14 +92,20 @@ def _heat_map(geom: Geometry, model: ECMModel, state: ECMState, sol,
     T_act = T_field[ii, jj, kk]
     soc = state.soc
     ocv = model.ocv_v(soc)
-    # local cell voltage = Δφ across the stack at this column
+    # local cell voltage = Δφ across the stack at this column (vectorized per roll)
     dphi = np.empty_like(soc)
-    for n, (i, j, k) in enumerate(active_ijk):
-        r = int(geom.cell_roll[i, j, k])
-        dphi[n] = sol.phi_pos[r][i, j] - sol.phi_neg[r][i, j]
+    roll_of = geom.cell_roll[ii, jj, kk]
+    for r, pp in sol.phi_pos.items():
+        m = roll_of == r
+        if np.any(m):
+            dphi[m] = pp[ii[m], jj[m]] - sol.phi_neg[r][ii[m], jj[m]]
     i_cv = sol.i_cv[ii, jj, kk]
-    q_irrev = i_cv * (ocv - dphi)               # overpotential heat (>=0)
-    q_rev = i_cv * T_act * model.dudt(soc)       # entropic (sign varies)
+    # Bernardi decomposition (PHYSICS §4): Q = I(U_ocv - V) - I*T*(dU/dT).
+    # Irreversible overpotential heat (dominant; = I^2*R over a cycle):
+    q_irrev = i_cv * (ocv - dphi)
+    # Reversible/entropic heat GENERATED = -I*T*(dU/dT). dU/dT comes from the entropy
+    # table (small, sign-changing for LFP); the leading minus is the Bernardi sign.
+    q_rev = -i_cv * T_act * model.dudt(soc)
     q_ecm = (q_irrev + q_rev) / V
     q_vol[ii, jj, kk] += q_ecm
     return q_vol
@@ -158,7 +164,15 @@ def run(cfg: SimConfig) -> Result:
                 break
             T_iter = T_new
         last_sol = sol
-        # ---- record ----
+        # ---- advance electrochemical state with the converged current FIRST, so the
+        #      recorded SOC is the end-of-step value consistent with time t+dt and T_new ----
+        T_act = T_new[ii, jj, kk]
+        j_area_act = sol.j_area[ii, jj, kk]
+        i_cv_act = sol.i_cv[ii, jj, kk]
+        state.advance_rc(model, j_area_act, T_act, dt)
+        state.advance_soc(model, i_cv_act, cap_act, T_act, dt)
+        T_field = T_new
+        # ---- record end-of-step state ----
         q_step = float((q_vol * V).sum())
         gen_energy += q_step * dt
         removed_energy += boundary_heat_removed(op, T_new.ravel(order="C")) * dt
@@ -171,16 +185,10 @@ def run(cfg: SimConfig) -> Result:
         Tmn.append(float(T_new.min()))
         qtot.append(q_step)
         T_hist.append(T_new.copy())
-        # ---- advance electrochemical state with the converged current ----
-        T_act = T_new[ii, jj, kk]
-        j_area_act = sol.j_area[ii, jj, kk]
-        i_cv_act = sol.i_cv[ii, jj, kk]
-        state.advance_rc(model, j_area_act, T_act, dt)
-        state.advance_soc(model, i_cv_act, cap_act, T_act, dt)
-        T_field = T_new
-        # stop if fully discharged/charged
-        if state.soc.mean() <= 0.0 or state.soc.mean() >= 1.0:
-            pass
+        # ---- stop once the cell is fully discharged/charged (avoid unphysical over-run) ----
+        soc_mean = float(state.soc.mean())
+        if soc_mean <= 1e-6 or soc_mean >= 1.0 - 1e-6:
+            break
 
     U1 = float((M * T_field.ravel(order="C")).sum())
     stored = U1 - U0
@@ -217,7 +225,7 @@ def _run_steady(cfg, geom, model, op, state, T_field, active_ijk, cap_act) -> Re
                             mode=mode, tol=cfg.solver.newton_tol, maxiter=cfg.solver.newton_max)
         q_vol = _heat_map(geom, model, state, sol, T_iter, active_ijk)
         T_new = solve_steady(op, q_vol).reshape(nx, ny, nz)
-        if np.max(np.abs(T_new - T_iter)) < 1e-4:
+        if np.max(np.abs(T_new - T_iter)) < cfg.solver.coupling_tol:
             T_iter = T_new
             break
         T_iter = T_new

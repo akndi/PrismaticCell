@@ -163,9 +163,11 @@ def build_geometry(cfg: SimConfig) -> Geometry:
     can_mat = cfg.materials[cfg.enclosure.material]
     gap_mat = cfg.materials.get("gap_air")
     if gap_mat is None:
-        # fall back to any low-conductivity filler: reuse can material scaled? No hard-coding:
-        # require a gap material to exist, else use separator-like: pick the enclosure's material
-        gap_mat = can_mat
+        raise ValueError(
+            "No 'gap_air' material defined. The inter-roll/clearance gaps need an explicit "
+            "filler material (define a low-conductivity 'gap_air' entry in the material DB) "
+            "rather than silently inheriting the metal can's properties."
+        )
     can_props = isotropic_props(can_mat, dz)
     gap_props = isotropic_props(gap_mat, dz)
 

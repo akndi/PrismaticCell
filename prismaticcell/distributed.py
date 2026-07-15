@@ -148,6 +148,21 @@ def solve_network(
     dx, dy = grid.dx, grid.dy
     T_field = np.asarray(T_field, dtype=np.float64)
 
+    # ---- degeneracy guards (prevent silently-singular systems) -----------------
+    if not any(roll.columns for roll in geom.rolls):
+        raise ValueError(
+            "No active control volumes in the mesh: the collector network is empty. "
+            "Refine the mesh so at least one jellyroll region is resolved (the documented "
+            "1x1 lumped limit needs a single-roll config or a mesh that resolves a roll)."
+        )
+    n_pos_nodes = sum(len(roll.tab_pos_nodes) for roll in geom.rolls)
+    n_neg_nodes = sum(len(roll.tab_neg_nodes) for roll in geom.rolls)
+    if n_pos_nodes == 0 or n_neg_nodes == 0:
+        raise ValueError(
+            "Network is not terminated: need at least one positive and one negative tab "
+            f"node (got {n_pos_nodes} pos, {n_neg_nodes} neg). Check tab edges/positions."
+        )
+
     # ---- per-active-CV state gathered onto (nx,ny,nz) fields --------------------
     aidx = _active_index_field(geom)                 # (nx,ny,nz) active index / -1
     soc = np.asarray(state.soc, dtype=np.float64)

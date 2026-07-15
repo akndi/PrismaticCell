@@ -8,3 +8,7 @@ outputs/
 *.png
 !docs/*.png
 .ipynb_checkpoints/
+
+# showcase figures (committed)
+!docs/figures/
+!docs/figures/*.png

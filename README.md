@@ -54,5 +54,32 @@ python examples/tab_placement_sweep.py                     # design sweep + plot
 | `configs/`, `data/`           | example configs and (replaceable) LFP data tables |
 | `tests/`, `examples/`         | analytical validations and runnable examples |
 
+## Example results
+
+Baseline 1C discharge (`examples/discharge_baseline.py`) — LFP voltage plateau with end knee,
+exact 1C SOC ramp, and the characteristic double-hump temperature (hot at the SOC extremes where
+resistance is high, cool on the flat plateau); global energy closes to ~1e-12:
+
+![time series](docs/figures/baseline_time_series.png)
+
+In-plane temperature field with the hotspot marked, and the areal current-density map showing
+current concentrating toward the tabs:
+
+![temperature field](docs/figures/baseline_temperature_slice.png)
+![current distribution](docs/figures/baseline_current_distribution.png)
+
+Design studies find real trade-offs: cooling a large face (top/bottom) holds ~45 °C vs ~80 °C for
+a side face at 2C (`examples/cooling_comparison.py`); and placing the two tabs at opposite ends of
+the edge minimizes current-density non-uniformity (`examples/tab_placement_sweep.py`).
+
+![tab sweep](docs/figures/tab_sweep_current_spread.png)
+
+## Validation
+
+`python -m pytest` runs 20 checks (PHYSICS §7): 1-D steady conduction vs closed form, lumped-
+capacitance transient, adiabatic-pulse and steady energy conservation, symmetric-cooling symmetry,
+SOC Coulomb balance, Arrhenius direction, entropy sign, charge conservation, discharge-below-OCV,
+the single-roll lumped limit, and end-to-end two-way-coupling energy closure.
+
 Parameters and data tables are **representative** starting points — replace `data/*.csv` and
 `configs/*.yaml` with your cell's characterization for quantitative design work.
