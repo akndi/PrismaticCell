@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prismaticcell"
+version = "0.1.0"
+description = "Physics-based distributed thermo-electrochemical model for LFP prismatic cells"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[project.scripts]
+prismaticcell = "prismaticcell.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["prismaticcell*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

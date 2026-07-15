@@ -1,0 +1,14 @@
+# Entropic coefficient dU/dT of LFP||graphite full cell vs SOC (representative, replace)
+# Small and sign-changing for LFP. soc [-], dUdT [V/K]
+soc,dUdT
+0.00,0.00022
+0.10,-0.00004
+0.20,-0.00010
+0.30,-0.00013
+0.40,-0.00014
+0.50,-0.00015
+0.60,-0.00013
+0.70,-0.00010
+0.80,-0.00004
+0.90,0.00006
+1.00,0.00016

@@ -1,0 +1,10 @@
+# Areal capacitance of RC pair 1 vs SOC at T_ref (representative, replace)
+# tau = r1*c1 sets the polarization time constant (~15-25 s here). soc [-], c1 [F/m^2]
+soc,c1
+0.00,12000
+0.10,15000
+0.20,18000
+0.50,20000
+0.80,19000
+0.90,16000
+1.00,13000

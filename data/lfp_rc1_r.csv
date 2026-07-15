@@ -1,0 +1,10 @@
+# Areal resistance of RC pair 1 (charge transfer) vs SOC at T_ref (representative, replace)
+# soc [-], r1 [Ohm*m^2]
+soc,r1
+0.00,0.00180
+0.10,0.00120
+0.20,0.00100
+0.50,0.00090
+0.80,0.00100
+0.90,0.00120
+1.00,0.00170

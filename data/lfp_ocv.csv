@@ -1,0 +1,18 @@
+# Open-circuit voltage of LFP||graphite full cell vs SOC (representative, replace with your data)
+# soc [-], ocv [V]
+soc,ocv
+0.00,2.900
+0.02,3.080
+0.05,3.170
+0.10,3.220
+0.20,3.270
+0.30,3.285
+0.40,3.295
+0.50,3.305
+0.60,3.312
+0.70,3.320
+0.80,3.330
+0.90,3.348
+0.95,3.400
+0.98,3.450
+1.00,3.500

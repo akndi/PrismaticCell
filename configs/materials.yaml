@@ -1,0 +1,52 @@
+# Shared material database for PrismaticCell (representative properties; replace with your data).
+# Each key is the material name. k_through / k_in support anisotropy; set equal for isotropic.
+# sigma_elec [S/m] is electronic conductivity (used for current collectors; 0 otherwise).
+materials:
+  al_collector:            # aluminium cathode current-collector foil
+    density: 2700.0        # kg/m^3
+    cp: 900.0              # J/kg/K
+    k_through: 238.0       # W/m/K
+    k_in: 238.0
+    sigma_elec: 3.5e7      # S/m
+
+  cu_collector:            # copper anode current-collector foil
+    density: 8960.0
+    cp: 385.0
+    k_through: 398.0
+    k_in: 398.0
+    sigma_elec: 5.96e7
+
+  lfp_cathode:             # LFP composite coating (electrode + binder + electrolyte, effective)
+    density: 2200.0
+    cp: 1000.0
+    k_through: 1.0
+    k_in: 1.0
+    sigma_elec: 0.0
+
+  graphite_anode:          # artificial-graphite composite coating (effective)
+    density: 1550.0
+    cp: 1100.0
+    k_through: 1.5
+    k_in: 1.5
+    sigma_elec: 0.0
+
+  separator:               # polyolefin separator wetted with electrolyte (effective)
+    density: 1200.0
+    cp: 1900.0
+    k_through: 0.30
+    k_in: 0.30
+    sigma_elec: 0.0
+
+  can_al:                  # prismatic aluminium can wall
+    density: 2700.0
+    cp: 900.0
+    k_through: 238.0
+    k_in: 238.0
+    sigma_elec: 0.0
+
+  gap_air:                 # inter-roll / headspace gas gap (effective conduction)
+    density: 1.2
+    cp: 1005.0
+    k_through: 0.03
+    k_in: 0.03
+    sigma_elec: 0.0

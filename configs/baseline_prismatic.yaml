@@ -1,0 +1,85 @@
+# Baseline representative LFP prismatic cell: aluminium can housing two jellyrolls.
+# All numbers are representative starting points for design sweeps -- override freely.
+name: baseline_prismatic_lfp
+
+include:
+  - materials.yaml          # shared material database (merged into `materials`)
+
+# CSV data tables are resolved relative to this config file's directory.
+ecm:
+  capacity_Ah: 20.0         # total nominal cell capacity
+  ocv_table: ../data/lfp_ocv.csv
+  entropy_table: ../data/lfp_entropy.csv
+  r0_table: ../data/lfp_r0.csv
+  ea_r0: 20000.0            # J/mol, Arrhenius activation energy for R0
+  t_ref: 298.15
+  rc_pairs:
+    - r_table: ../data/lfp_rc1_r.csv
+      c_table: ../data/lfp_rc1_c.csv
+      ea_r: 22000.0
+      ea_c: 0.0
+
+assembly:
+  arrangement: side_by_side_x
+  inter_gap: 1.5e-3         # m, gap between the two jellyrolls
+  wall_clearance: 5.0e-4    # m, roll-to-can clearance
+  jellyrolls:
+    - n_stacks: 20
+      stack:
+        width: 0.048        # m, per-roll electrode footprint in x
+        height: 0.150       # m, in y
+        layers:
+          - {role: pos_collector,   material: al_collector,   thickness: 16.0e-6}
+          - {role: cathode_coating, material: lfp_cathode,    thickness: 80.0e-6}
+          - {role: separator,       material: separator,      thickness: 20.0e-6}
+          - {role: anode_coating,   material: graphite_anode, thickness: 90.0e-6}
+          - {role: neg_collector,   material: cu_collector,   thickness: 10.0e-6}
+    - n_stacks: 20
+      stack:
+        width: 0.048
+        height: 0.150
+        layers:
+          - {role: pos_collector,   material: al_collector,   thickness: 16.0e-6}
+          - {role: cathode_coating, material: lfp_cathode,    thickness: 80.0e-6}
+          - {role: separator,       material: separator,      thickness: 20.0e-6}
+          - {role: anode_coating,   material: graphite_anode, thickness: 90.0e-6}
+          - {role: neg_collector,   material: cu_collector,   thickness: 10.0e-6}
+
+enclosure:
+  kind: prismatic
+  material: can_al
+  wall_thickness: 0.8e-3
+  contact_conductance: 150.0   # W/m^2/K, stack-to-wall interfacial conductance
+
+tabs:
+  - {polarity: pos, edge: y_max, position: 0.25, width: 0.020, thickness: 0.2e-3, length: 0.010, material: al_collector}
+  - {polarity: neg, edge: y_max, position: 0.75, width: 0.020, thickness: 0.2e-3, length: 0.010, material: cu_collector}
+
+mesh:
+  nx: 12
+  ny: 16
+  nz: 8
+
+cooling:
+  bottom: {kind: convection, h: 30.0, t_inf: 298.15}   # cold plate on the bottom face
+  top:    {kind: adiabatic}
+  x_min:  {kind: convection, h: 8.0,  t_inf: 298.15}
+  x_max:  {kind: convection, h: 8.0,  t_inf: 298.15}
+  y_min:  {kind: convection, h: 8.0,  t_inf: 298.15}
+  y_max:  {kind: convection, h: 8.0,  t_inf: 298.15}
+
+load:
+  kind: constant_crate
+  value: 1.0                # 1C discharge
+
+solver:
+  mode: transient
+  dt: 10.0
+  t_end: 3600.0
+  max_subiter: 20
+  coupling_tol: 1.0e-6
+  newton_tol: 1.0e-9
+  newton_max: 50
+  linear_solver: direct
+
+t_init: 298.15

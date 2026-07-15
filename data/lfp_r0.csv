@@ -1,0 +1,13 @@
+# Areal ohmic resistance R0 of the cell sandwich vs SOC at T_ref (representative, replace)
+# Area-specific: multiply by local current density [A/m^2] to get overpotential [V].
+# soc [-], r0 [Ohm*m^2]
+soc,r0
+0.00,0.00350
+0.10,0.00220
+0.20,0.00185
+0.30,0.00172
+0.50,0.00160
+0.70,0.00165
+0.80,0.00175
+0.90,0.00205
+1.00,0.00300
