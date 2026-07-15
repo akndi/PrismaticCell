@@ -80,6 +80,12 @@ the edge minimizes current-density non-uniformity (`examples/tab_placement_sweep
 
 ![tab sweep](docs/figures/tab_sweep_current_spread.png)
 
+Radiation matters when convection is weak: under natural convection (h=5 W/m²/K), raising surface
+emissivity 0→0.9 drops peak temperature ~11 °C and grows radiation to ~55 % of total heat
+rejection (`examples/cooling_comparison.py`):
+
+![radiation contribution](docs/figures/radiation_contribution.png)
+
 ## Validation
 
 `python -m pytest` runs 26 checks (PHYSICS §7): 1-D steady conduction vs closed form, lumped-
