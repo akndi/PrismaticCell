@@ -160,20 +160,28 @@ def test_tab_thickness_defaults_to_collector():
 
 
 def test_face_role_map_matches_orientation():
-    """Role face names map to the correct physical faces for the stack axis."""
+    """Role face names map to the correct physical faces / planes for the stack axis.
+
+    For length=X, height=Z, thickness=Y (stack_axis='y'):
+      top/bottom -> XY plane (normal Z); front/back -> XZ plane (normal Y, big faces);
+      left/right -> YZ plane (normal X, small faces).
+    """
     from prismaticcell.config import face_role_map
-    my = face_role_map("y")            # length=X, height=Z, thickness=Y
-    assert my["side_face_1"] == "y_min" and my["side_face_2"] == "y_max"   # large flat faces
-    assert my["top_face"] == "top" and my["bottom_face"] == "bottom"       # height ends (Z)
-    assert my["side_face_3"] == "x_min" and my["side_face_4"] == "x_max"   # length ends
-    mz = face_role_map("z")            # default: large faces normal to Z = top/bottom
-    assert {mz["side_face_1"], mz["side_face_2"]} == {"top", "bottom"}
+    my = face_role_map("y")
+    assert my["front_face"] == "y_max" and my["back_face"] == "y_min"      # big faces (normal Y)
+    assert my["top_face"] == "top" and my["bottom_face"] == "bottom"       # height ends (normal Z)
+    assert my["left_face"] == "x_min" and my["right_face"] == "x_max"      # length ends (normal X)
+    # numbered aliases: 1/2 = big front/back, 3/4 = small ends
+    assert my["side_face_1"] == "y_min" and my["side_face_2"] == "y_max"
+    assert my["side_face_3"] == "x_min" and my["side_face_4"] == "x_max"
+    mz = face_role_map("z")            # default: big faces normal to Z = top/bottom
+    assert {mz["front_face"], mz["back_face"]} == {"top", "bottom"}
 
 
 def test_role_based_cooling_from_yaml():
     """A YAML config using role face names cools the intended physical faces."""
     path = os.path.join(os.path.dirname(__file__), "..", "configs", "large_prismatic.yaml")
     cfg = SimConfig.from_yaml(path)
-    # side_face_1/2 (large flat faces) -> y_min/y_max got the convection BC
+    # front/back (large flat faces) -> y_min/y_max got the convection BC
     assert cfg.cooling.y_min.kind == "convection" and cfg.cooling.y_max.kind == "convection"
     assert cfg.cooling.top.kind == "adiabatic" and cfg.cooling.x_min.kind == "adiabatic"

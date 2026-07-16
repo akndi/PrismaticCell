@@ -233,25 +233,30 @@ class Cooling:
 
 # Role-based face naming. Physical faces per axis as (negative_face, positive_face):
 _AXIS_FACES = {0: ("x_min", "x_max"), 1: ("y_min", "y_max"), 2: ("bottom", "top")}
-FACE_ROLES = ("top_face", "bottom_face", "side_face_1", "side_face_2",
-              "side_face_3", "side_face_4")
+FACE_ROLES = ("top_face", "bottom_face", "front_face", "back_face", "left_face", "right_face",
+              "side_face_1", "side_face_2", "side_face_3", "side_face_4")
 
 
 def face_role_map(stack_axis: str) -> Dict[str, str]:
-    """Map role face names to physical face names for a given ``stack_axis``.
+    """Map role face names to physical faces for a given ``stack_axis`` (length = first non-stack
+    axis, height = second).
 
-    Convention (with length = first non-stack axis, height = second):
-      - ``top_face`` / ``bottom_face`` = the +/- HEIGHT faces (the height-axis ends),
-      - ``side_face_1`` / ``side_face_2`` = the two LARGE flat faces (normal to the stack axis),
-      - ``side_face_3`` / ``side_face_4`` = the LENGTH ends (normal to the length axis).
-    e.g. for ``stack_axis='y'``: top/bottom = top/bottom (z), side_1/2 = y_min/y_max (large flat),
-    side_3/4 = x_min/x_max (length ends).
+    Intuitive names (for a cell with length=X, height=Z, thickness/stack=Y, i.e. stack_axis='y'):
+      - ``top_face`` / ``bottom_face``  = the +/- HEIGHT faces  (XY plane, normal to height Z)
+      - ``front_face`` / ``back_face``  = the two LARGE flat faces (XZ plane, normal to the stack
+        axis Y) -- the big front/back faces
+      - ``left_face`` / ``right_face``  = the small end faces  (YZ plane, normal to length X)
+    ``side_face_1/2`` are aliases for front/back (large faces); ``side_face_3/4`` for left/right.
     """
     sa = {"x": 0, "y": 1, "z": 2}[stack_axis]
     la, ha = [a for a in (0, 1, 2) if a != sa]
     return {
         "top_face": _AXIS_FACES[ha][1], "bottom_face": _AXIS_FACES[ha][0],
+        # large flat faces: normal to the stack axis (thickness) -> the biggest faces
+        "back_face": _AXIS_FACES[sa][0], "front_face": _AXIS_FACES[sa][1],
         "side_face_1": _AXIS_FACES[sa][0], "side_face_2": _AXIS_FACES[sa][1],
+        # small end faces: normal to the length axis
+        "left_face": _AXIS_FACES[la][0], "right_face": _AXIS_FACES[la][1],
         "side_face_3": _AXIS_FACES[la][0], "side_face_4": _AXIS_FACES[la][1],
     }
 

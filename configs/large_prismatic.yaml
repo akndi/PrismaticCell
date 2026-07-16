@@ -66,14 +66,15 @@ mesh:
 
 cooling:
   # Role-based face names (mapped to physical faces via stack_axis):
-  #   side_face_1/2 = the two LARGE flat faces (normal to thickness Y here)
-  #   side_face_3/4 = the length ends;  top_face/bottom_face = the height ends
-  side_face_1: {kind: convection, h: 25.0, t_inf: 298.15}   # large flat face
-  side_face_2: {kind: convection, h: 25.0, t_inf: 298.15}   # large flat face
-  side_face_3: {kind: adiabatic}    # length end
-  side_face_4: {kind: adiabatic}    # length end
-  top_face:    {kind: adiabatic}    # height end (+Z)
-  bottom_face: {kind: adiabatic}    # height end (-Z)
+  #   front_face/back_face = the big flat faces (XZ plane, normal to thickness Y)  <- cooled
+  #   left_face/right_face = the small end faces (YZ plane, normal to length X)
+  #   top_face/bottom_face = the height ends (XY plane, normal to height Z)
+  front_face: {kind: convection, h: 25.0, t_inf: 298.15}   # big flat face (XZ plane)
+  back_face:  {kind: convection, h: 25.0, t_inf: 298.15}   # big flat face (XZ plane)
+  left_face:  {kind: adiabatic}    # length end (YZ plane)
+  right_face: {kind: adiabatic}    # length end (YZ plane)
+  top_face:    {kind: adiabatic}   # height end (XY plane)
+  bottom_face: {kind: adiabatic}   # height end (XY plane)
 
 load:
   kind: constant_crate
