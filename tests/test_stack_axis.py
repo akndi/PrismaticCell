@@ -157,3 +157,23 @@ def test_tab_thickness_defaults_to_collector():
     g = build_geometry(cfg)
     # pos tab (Al) and neg tab (Cu) conductances reflect the collector thicknesses & sigmas
     assert g.g_tab_pos > 0 and g.g_tab_neg > 0
+
+
+def test_face_role_map_matches_orientation():
+    """Role face names map to the correct physical faces for the stack axis."""
+    from prismaticcell.config import face_role_map
+    my = face_role_map("y")            # length=X, height=Z, thickness=Y
+    assert my["side_face_1"] == "y_min" and my["side_face_2"] == "y_max"   # large flat faces
+    assert my["top_face"] == "top" and my["bottom_face"] == "bottom"       # height ends (Z)
+    assert my["side_face_3"] == "x_min" and my["side_face_4"] == "x_max"   # length ends
+    mz = face_role_map("z")            # default: large faces normal to Z = top/bottom
+    assert {mz["side_face_1"], mz["side_face_2"]} == {"top", "bottom"}
+
+
+def test_role_based_cooling_from_yaml():
+    """A YAML config using role face names cools the intended physical faces."""
+    path = os.path.join(os.path.dirname(__file__), "..", "configs", "large_prismatic.yaml")
+    cfg = SimConfig.from_yaml(path)
+    # side_face_1/2 (large flat faces) -> y_min/y_max got the convection BC
+    assert cfg.cooling.y_min.kind == "convection" and cfg.cooling.y_max.kind == "convection"
+    assert cfg.cooling.top.kind == "adiabatic" and cfg.cooling.x_min.kind == "adiabatic"

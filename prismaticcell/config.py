@@ -216,13 +216,60 @@ class FaceBC:
 
 @dataclass
 class Cooling:
-    """Per-face boundary conditions. Any omitted face defaults to adiabatic."""
+    """Per-face boundary conditions. Any omitted face defaults to adiabatic.
+
+    Faces may be given either by **physical** name (``top``/``bottom`` = +z/-z, ``x_min``/``x_max``,
+    ``y_min``/``y_max``) or by **role** name that follows the cell orientation
+    (``top_face``/``bottom_face``/``side_face_1..4``, see :func:`face_role_map`). Role names are
+    translated to physical faces at load time based on ``assembly.stack_axis``.
+    """
     top: FaceBC = field(default_factory=lambda: FaceBC("adiabatic"))
     bottom: FaceBC = field(default_factory=lambda: FaceBC("adiabatic"))
     x_min: FaceBC = field(default_factory=lambda: FaceBC("adiabatic"))
     x_max: FaceBC = field(default_factory=lambda: FaceBC("adiabatic"))
     y_min: FaceBC = field(default_factory=lambda: FaceBC("adiabatic"))
     y_max: FaceBC = field(default_factory=lambda: FaceBC("adiabatic"))
+
+
+# Role-based face naming. Physical faces per axis as (negative_face, positive_face):
+_AXIS_FACES = {0: ("x_min", "x_max"), 1: ("y_min", "y_max"), 2: ("bottom", "top")}
+FACE_ROLES = ("top_face", "bottom_face", "side_face_1", "side_face_2",
+              "side_face_3", "side_face_4")
+
+
+def face_role_map(stack_axis: str) -> Dict[str, str]:
+    """Map role face names to physical face names for a given ``stack_axis``.
+
+    Convention (with length = first non-stack axis, height = second):
+      - ``top_face`` / ``bottom_face`` = the +/- HEIGHT faces (the height-axis ends),
+      - ``side_face_1`` / ``side_face_2`` = the two LARGE flat faces (normal to the stack axis),
+      - ``side_face_3`` / ``side_face_4`` = the LENGTH ends (normal to the length axis).
+    e.g. for ``stack_axis='y'``: top/bottom = top/bottom (z), side_1/2 = y_min/y_max (large flat),
+    side_3/4 = x_min/x_max (length ends).
+    """
+    sa = {"x": 0, "y": 1, "z": 2}[stack_axis]
+    la, ha = [a for a in (0, 1, 2) if a != sa]
+    return {
+        "top_face": _AXIS_FACES[ha][1], "bottom_face": _AXIS_FACES[ha][0],
+        "side_face_1": _AXIS_FACES[sa][0], "side_face_2": _AXIS_FACES[sa][1],
+        "side_face_3": _AXIS_FACES[la][0], "side_face_4": _AXIS_FACES[la][1],
+    }
+
+
+def _cooling_roles_to_physical(cooling_raw: Dict[str, Any], stack_axis: str) -> Dict[str, Any]:
+    """Translate a role-keyed cooling dict to physical face keys (from YAML preprocessing)."""
+    mapping = face_role_map(stack_axis)
+    out: Dict[str, Any] = {}
+    for role, bc in cooling_raw.items():
+        if role not in mapping:
+            raise ValueError(
+                f"unknown cooling face role '{role}'; use one of {FACE_ROLES} "
+                f"(or physical names top/bottom/x_min/x_max/y_min/y_max)")
+        if mapping[role] in out:
+            raise ValueError(f"cooling role '{role}' maps to physical face '{mapping[role]}' "
+                             "which is already assigned")
+        out[mapping[role]] = bc
+    return out
 
 
 @dataclass
@@ -305,6 +352,16 @@ class SimConfig:
                     merged.update(raw[k])
                     raw[k] = merged
         raw.setdefault("data_root", base_dir)
+        # Translate role-based cooling face names (top_face/bottom_face/side_face_1..4) to
+        # physical faces, based on the assembly's stack axis.
+        cooling_raw = raw.get("cooling")
+        if isinstance(cooling_raw, dict) and any(k in FACE_ROLES for k in cooling_raw):
+            phys = {k for k in cooling_raw if k not in FACE_ROLES}
+            if phys:
+                raise ValueError(f"cooling mixes role and physical face names: {sorted(phys)}. "
+                                 "Use one naming scheme.")
+            stack_axis = (raw.get("assembly") or {}).get("stack_axis", "z")
+            raw["cooling"] = _cooling_roles_to_physical(cooling_raw, stack_axis)
         cfg = _build(cls, raw)
         cfg.validate()
         return cfg

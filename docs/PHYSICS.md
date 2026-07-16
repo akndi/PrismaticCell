@@ -182,6 +182,12 @@ with anisotropic conductivity tensor `K = diag(k_x, k_y, k_z)` per cell (from §
 map: stack / collector / tab / enclosure). Face conductances between neighbor cells use the
 harmonic mean of the two cells' directional conductivities (series resistance).
 
+Faces may be named **physically** (`top`/`bottom` = +z/-z, `x_min/x_max`, `y_min/y_max`) or by
+**role** following the cell orientation — `top_face`/`bottom_face` (the height-axis ends),
+`side_face_1`/`side_face_2` (the two large flat faces, normal to the stack axis), and
+`side_face_3`/`side_face_4` (the length ends). Role names are translated to physical faces from
+`assembly.stack_axis` at load time (`config.face_role_map`).
+
 ### 5.1 Boundary conditions (independent per face: top, bottom, 4 sides)
 
 - **Convection:** `−k ∂T/∂n = h (T_s − T_∞)`
