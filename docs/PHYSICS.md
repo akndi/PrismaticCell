@@ -10,16 +10,29 @@ tables. All quantities are SI unless noted.
 
 ```
 Prismatic cell = metal can (enclosure)
-  └─ 2 jellyrolls (electrically in parallel to the cell tabs, thermally coupled via can + gap)
+  └─ N jellyrolls (electrically in parallel to the cell tabs, thermally coupled via can + gap)
        └─ each jellyroll = n_stacks electrode sandwiches through the thickness
             └─ each sandwich = CathodeCC | Cathode | Separator | Anode | AnodeCC
 ```
 
 The cell volume is discretized into a **3-D structured control-volume grid** (`nx × ny × nz`).
-`x,y` are in-plane; `z` runs through the sandwich-stacking direction. Each CV is tagged with a
-**region** (jellyroll-active / inter-roll gap / can wall / tab / headspace) and inherits that
-region's material properties. Every *electrochemically active* CV carries its own ECM (§2). The
-two jellyrolls are separate active regions summed in parallel at the terminal constraint (§3.2).
+The **stack axis** (`assembly.stack_axis` ∈ {x,y,z}) is the through-plane / thickness direction
+along which the sandwiches build up; the other two physical axes are the in-plane electrode plane
+— the first (in x<y<z order) is the electrode **length**, the second the electrode **height**.
+For a long flat prismatic cell one sets `stack_axis: y` → length = X, height = Z, thickness = Y
+(two jellyrolls back-to-back along Y). Anisotropy follows the stack axis: through-plane `k_through`
+along the stack axis, in-plane `k_in` along the other two. Jellyrolls are arranged `stacked`
+(back-to-back along the stack axis) or `side_by_side_length|height`.
+
+Each CV is tagged with a **region** (jellyroll-active / inter-roll gap / can wall) and inherits
+that region's material properties. Every *electrochemically active* CV carries its own ECM (§2).
+The jellyrolls are separate active regions summed in parallel at the terminal constraint (§3.2).
+
+**Tabs** are rectangular contact footprints on the electrode plane (fractional location + length ×
+height extents); the tab thickness/material default to that polarity's current collector (e.g. Al
+13 µm / Cu 6 µm) and all `n_stacks` foils bus to it in parallel. The footprint sets where current
+enters/leaves the collector (the tab-placement design lever); the protrusion sets the series tab
+resistance and the tab heat-loss path (§3, §5).
 
 ## 1. Thermal homogenization (per active CV)
 

@@ -87,23 +87,42 @@ class Jellyroll:
 
 @dataclass
 class Assembly:
-    """The internals of the can: one or more jellyrolls and how they are arranged."""
+    """The internals of the can: one or more jellyrolls and how they are arranged.
+
+    ``stack_axis`` is the physical axis along which the sandwiches (and the jellyrolls, when
+    ``arrangement="stacked"``) build up — i.e. the through-plane / thickness direction. The other
+    two axes are the in-plane electrode plane: the first (in x<y<z order) is the electrode LENGTH,
+    the second is the electrode HEIGHT. Example for a long flat prismatic cell: ``stack_axis="y"``
+    → length = X, height = Z, thickness = Y (two jellyrolls back-to-back along Y).
+    """
     jellyrolls: List[Jellyroll]
-    arrangement: Literal["side_by_side_x", "side_by_side_y", "stacked_z"] = "side_by_side_x"
+    stack_axis: Literal["x", "y", "z"] = "z"
+    arrangement: Literal["stacked", "side_by_side_length", "side_by_side_height"] = "stacked"
     inter_gap: float = 1e-3     # m, gap between adjacent jellyrolls
     wall_clearance: float = 5e-4  # m, gap between roll bounding box and can wall
 
 
 @dataclass
 class Tab:
-    """A current tab welded to a collector at a parametric edge position."""
+    """A current tab: a rectangular contact footprint on the electrode (in-plane) plane.
+
+    The footprint is where the collector foils bundle and weld to the terminal; it sets where
+    current enters/leaves the collector (the tab-placement design lever). Location is fractional
+    (0..1) along the electrode LENGTH and HEIGHT axes; ``size_length``/``size_height`` are the
+    footprint extents [m]. ``thickness`` defaults to this polarity's current-collector thickness
+    (e.g. Al 13 µm / Cu 6 µm) and ``material`` to its collector material — i.e. "a tab the size of
+    the current-collector thickness". All ``n_stacks`` collector foils (both jellyrolls) bus to it
+    in parallel. ``protrusion`` is the out-of-cell tab length used for the series R_tab and the
+    tab heat-loss path.
+    """
     polarity: Literal["pos", "neg"]
-    edge: Literal["x_min", "x_max", "y_min", "y_max"]
-    position: float             # fractional location along the edge, 0..1
-    width: float                # m, tab width along the edge
-    thickness: float            # m
-    length: float               # m, protrusion beyond the enclosure
-    material: str               # key into material database
+    loc_length: float = 0.5     # fractional center along the electrode length axis (0..1)
+    loc_height: float = 0.5     # fractional center along the electrode height axis (0..1)
+    size_length: float = 0.02   # m, footprint extent along the length axis
+    size_height: float = 0.02   # m, footprint extent along the height axis
+    protrusion: float = 0.01    # m, tab protrusion out of the cell (R_tab & heat path)
+    thickness: Optional[float] = None   # m; default = this polarity's collector thickness
+    material: Optional[str] = None      # default = this polarity's collector material
 
 
 @dataclass
@@ -311,10 +330,12 @@ class SimConfig:
                 if lyr.thickness <= 0:
                     errors.append(f"jellyroll[{ridx}] layer role={lyr.role} thickness must be > 0")
         for t in self.tabs:
-            if t.material not in known:
+            if t.material is not None and t.material not in known:
                 errors.append(f"tab {t.polarity} references unknown material '{t.material}'")
-            if not (0.0 <= t.position <= 1.0):
-                errors.append(f"tab {t.polarity} position must be in [0,1]")
+            if not (0.0 <= t.loc_length <= 1.0) or not (0.0 <= t.loc_height <= 1.0):
+                errors.append(f"tab {t.polarity} loc_length/loc_height must be in [0,1]")
+            if t.size_length <= 0 or t.size_height <= 0:
+                errors.append(f"tab {t.polarity} size_length/size_height must be > 0")
         if self.enclosure.material not in known:
             errors.append(f"enclosure references unknown material '{self.enclosure.material}'")
         # need at least one pos and one neg tab

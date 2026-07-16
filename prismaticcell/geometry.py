@@ -27,6 +27,8 @@ REGION_GAP = 1
 REGION_ACTIVE = 2
 REGION_TAB = 3
 
+_AX = {"x": 0, "y": 1, "z": 2}   # physical grid-axis index for each named axis
+
 
 @dataclass
 class Grid:
@@ -85,10 +87,22 @@ class Geometry:
     wall_thickness: float = 0.0        # m, shell thickness
     wall_k: float = 0.0                # W/m/K, shell in-plane conductivity
     wall_rhocp: float = 0.0            # J/m^3/K, shell volumetric heat capacity
+    # Axis roles (physical grid axis index 0/1/2 for x/y/z):
+    stack_axis: int = 2                # through-plane / thickness / sandwich-stacking axis
+    len_axis: int = 0                  # electrode length (first in-plane axis)
+    hgt_axis: int = 1                  # electrode height (second in-plane axis)
 
     @property
     def n_active(self) -> int:
         return int(self.active_mask.sum())
+
+    def phys_index(self, a: int, b: int, s: int) -> Tuple[int, int, int]:
+        """Map electrode (length index a, height index b, stack index s) -> physical (i,j,k)."""
+        t = [0, 0, 0]
+        t[self.len_axis] = a
+        t[self.hgt_axis] = b
+        t[self.stack_axis] = s
+        return t[0], t[1], t[2]
 
 
 def _role_layer(layers, role):
@@ -108,57 +122,46 @@ def build_geometry(cfg: SimConfig) -> Geometry:
     clr = cfg.assembly.wall_clearance
     gap = cfg.assembly.inter_gap
     rolls_cfg = cfg.assembly.jellyrolls
-
-    # Per-roll footprint and thickness
-    roll_w = [r.stack.width for r in rolls_cfg]
-    roll_h = [r.stack.height for r in rolls_cfg]
-    roll_tz = [r.n_stacks * sandwich_thickness(r.stack.layers) for r in rolls_cfg]
-
-    arrangement = cfg.assembly.arrangement
     nr = len(rolls_cfg)
 
-    # Cavity dimensions from arrangement
-    if arrangement == "side_by_side_x":
-        cav_x = sum(roll_w) + gap * (nr - 1) + 2 * clr
-        cav_y = max(roll_h) + 2 * clr
-        cav_z = max(roll_tz) + 2 * clr
-    elif arrangement == "side_by_side_y":
-        cav_x = max(roll_w) + 2 * clr
-        cav_y = sum(roll_h) + gap * (nr - 1) + 2 * clr
-        cav_z = max(roll_tz) + 2 * clr
-    elif arrangement == "stacked_z":
-        cav_x = max(roll_w) + 2 * clr
-        cav_y = max(roll_h) + 2 * clr
-        cav_z = sum(roll_tz) + gap * (nr - 1) + 2 * clr
+    # Axis roles: stack_axis = through-plane/thickness; the other two (in x<y<z order) are the
+    # electrode LENGTH (la) and HEIGHT (ha) axes.
+    sa = _AX[cfg.assembly.stack_axis]
+    la, ha = [ax for ax in (0, 1, 2) if ax != sa]
+
+    # Per-roll extent along each physical axis: length axis <- stack.width, height axis <-
+    # stack.height, stack axis <- n_stacks * sandwich thickness.
+    size = {la: [r.stack.width for r in rolls_cfg],
+            ha: [r.stack.height for r in rolls_cfg],
+            sa: [r.n_stacks * sandwich_thickness(r.stack.layers) for r in rolls_cfg]}
+
+    arrangement = cfg.assembly.arrangement
+    if arrangement == "stacked":
+        arr_axis = sa                      # jellyrolls stacked back-to-back through the thickness
+    elif arrangement == "side_by_side_length":
+        arr_axis = la
+    elif arrangement == "side_by_side_height":
+        arr_axis = ha
     else:  # pragma: no cover - guarded by config Literal
         raise ValueError(f"unknown arrangement '{arrangement}'")
 
-    Lx = cav_x + 2 * wall
-    Ly = cav_y + 2 * wall
-    Lz = cav_z + 2 * wall
+    # Cavity extent per physical axis (rolls sum along the arrangement axis, else max)
+    cav = [0.0, 0.0, 0.0]
+    for ax in (0, 1, 2):
+        cav[ax] = (sum(size[ax]) + gap * (nr - 1) if ax == arr_axis else max(size[ax])) + 2 * clr
+    L = [cav[ax] + 2 * wall for ax in (0, 1, 2)]
+    Lx, Ly, Lz = L
 
-    # Roll bounding boxes in outer coordinates
-    bboxes: List[Tuple[float, float, float, float, float, float]] = []
-    cx = wall + clr
-    cy = wall + clr
-    cz = wall + clr
+    # Roll bounding boxes (lo,hi) per physical axis
+    bboxes: List[List[Tuple[float, float]]] = []
+    cursor = wall + clr
     for r in range(nr):
-        if arrangement == "side_by_side_x":
-            x0, x1 = cx, cx + roll_w[r]
-            y0, y1 = wall + clr, wall + clr + roll_h[r]
-            z0, z1 = wall + clr, wall + clr + roll_tz[r]
-            cx = x1 + gap
-        elif arrangement == "side_by_side_y":
-            x0, x1 = wall + clr, wall + clr + roll_w[r]
-            y0, y1 = cy, cy + roll_h[r]
-            z0, z1 = wall + clr, wall + clr + roll_tz[r]
-            cy = y1 + gap
-        else:  # stacked_z
-            x0, x1 = wall + clr, wall + clr + roll_w[r]
-            y0, y1 = wall + clr, wall + clr + roll_h[r]
-            z0, z1 = cz, cz + roll_tz[r]
-            cz = z1 + gap
-        bboxes.append((x0, x1, y0, y1, z0, z1))
+        box = [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+        for ax in (0, 1, 2):
+            lo = cursor if ax == arr_axis else wall + clr
+            box[ax] = (lo, lo + size[ax][r])
+        cursor = box[arr_axis][1] + gap
+        bboxes.append(box)
 
     nx, ny, nz = cfg.mesh.nx, cfg.mesh.ny, cfg.mesh.nz
     dx, dy, dz = Lx / nx, Ly / ny, Lz / nz
@@ -210,17 +213,20 @@ def build_geometry(cfg: SimConfig) -> Geometry:
                     continue
                 # inside cavity: which roll?
                 found = -1
-                for r, (x0, x1, y0, y1, z0, z1) in enumerate(bboxes):
-                    if x0 <= xi <= x1 and y0 <= yj <= y1 and z0 <= zk <= z1:
+                cc = (xi, yj, zk)
+                for r, box in enumerate(bboxes):
+                    if all(box[ax][0] <= cc[ax] <= box[ax][1] for ax in (0, 1, 2)):
                         found = r
                         break
                 if found >= 0:
                     hp = roll_props[found]
                     region[i, j, k] = REGION_ACTIVE
                     cell_roll[i, j, k] = found
-                    kx[i, j, k] = hp.k_x
-                    ky[i, j, k] = hp.k_y
-                    kz[i, j, k] = hp.k_z
+                    # anisotropy follows the stack axis: k_through (hp.k_z) along the stack axis,
+                    # k_in (hp.k_x) along the two in-plane axes.
+                    kx[i, j, k] = hp.k_z if sa == 0 else hp.k_x
+                    ky[i, j, k] = hp.k_z if sa == 1 else hp.k_x
+                    kz[i, j, k] = hp.k_z if sa == 2 else hp.k_x
                     rho_cp[i, j, k] = hp.rho_cp
                 else:
                     region[i, j, k] = REGION_GAP
@@ -231,28 +237,31 @@ def build_geometry(cfg: SimConfig) -> Geometry:
 
     active_mask = region == REGION_ACTIVE
 
-    # Per-roll electro mapping
+    # Per-roll electro mapping in electrode coordinates: (a = length index, b = height index)
+    # are the in-plane "columns"; col_zcells[(a,b)] are the through-thickness stack-cell indices.
+    coords = [xc, yc, zc]
+    d = [dx, dy, dz]
+    d_la, d_ha = d[la], d[ha]
     rolls: List[RollElectro] = []
     area_eff_total = np.zeros((nx, ny, nz))
     for r, rc in enumerate(rolls_cfg):
-        roll_cells = (cell_roll == r) & active_mask
-        # active z-cells for this roll (assume uniform across columns)
-        z_active = sorted({k for i in range(nx) for j in range(ny) for k in range(nz)
-                           if roll_cells[i, j, k]})
-        n_active_z = max(len(z_active), 1)
-        n_sand_per_cell = rc.n_stacks / n_active_z
+        roll_cells = np.argwhere((cell_roll == r) & active_mask)   # physical (i,j,k) rows
+        s_active = sorted({int(cell[sa]) for cell in roll_cells})
+        n_active_s = max(len(s_active), 1)
+        n_sand_per_cell = rc.n_stacks / n_active_s
 
         columns: List[Tuple[int, int]] = []
         col_zcells: Dict[Tuple[int, int], List[int]] = {}
         area_eff = np.zeros((nx, ny, nz))
-        for i in range(nx):
-            for j in range(ny):
-                ks = [k for k in range(nz) if roll_cells[i, j, k]]
-                if ks:
-                    columns.append((i, j))
-                    col_zcells[(i, j)] = ks
-                    for k in ks:
-                        area_eff[i, j, k] = dx * dy * n_sand_per_cell
+        colmap: Dict[Tuple[int, int], List[int]] = {}
+        for cell in roll_cells:
+            i, j, k = int(cell[0]), int(cell[1]), int(cell[2])
+            a, b, s = cell[la], cell[ha], cell[sa]
+            colmap.setdefault((int(a), int(b)), []).append(int(s))
+            area_eff[i, j, k] = d_la * d_ha * n_sand_per_cell
+        for ab, ss in colmap.items():
+            columns.append(ab)
+            col_zcells[ab] = sorted(ss)
         area_eff_total += area_eff
 
         pos_layer = _role_layer(rc.stack.layers, "pos_collector")
@@ -265,7 +274,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         tab_pos_nodes: List[Tuple[int, int]] = []
         tab_neg_nodes: List[Tuple[int, int]] = []
         for tab in cfg.tabs:
-            nodes = _tab_edge_nodes(tab, columns, grid, (Lx, Ly))
+            nodes = _tab_footprint_nodes(tab, columns, coords, la, ha, (L[la], L[ha]))
             if tab.polarity == "pos":
                 tab_pos_nodes.extend(nodes)
             else:
@@ -283,20 +292,30 @@ def build_geometry(cfg: SimConfig) -> Geometry:
             tab_neg_nodes=tab_neg_nodes,
         ))
 
-    # Tab electrical + thermal conductances from tab geometry/material (PHYSICS §3, §5):
-    #   electrical G = sigma * (w*t) / L  [S];  thermal G = k * (w*t) / L  [W/K]
+    # Tab electrical + thermal conductances (footprint-based; PHYSICS §3, §5). The tab bundles
+    # all n_stacks collector foils of both jellyrolls in parallel, each of cross-section
+    # (size_length * thickness), conducting over the protrusion length:
+    #   G_elec = sigma * n_foils * (size_length * thickness) / protrusion   [S]
+    #   G_therm = k    * n_foils * (size_length * thickness) / protrusion   [W/K]
+    # Tab thickness/material default to that polarity's current collector (Al pos / Cu neg).
+    n_foils = sum(r.n_stacks for r in rolls_cfg)
+    ref_layers = rolls_cfg[0].stack.layers
+    coll = {"pos": _role_layer(ref_layers, "pos_collector"),
+            "neg": _role_layer(ref_layers, "neg_collector")}
     g_tab_pos = g_tab_neg = 0.0
     tab_heat_pos = tab_heat_neg = 0.0
     for tab in cfg.tabs:
-        mat = cfg.materials[tab.material]
-        L = max(tab.length, 1e-9)
-        xsec = tab.width * tab.thickness
+        clayer = coll[tab.polarity]
+        thickness = tab.thickness if tab.thickness is not None else clayer.thickness
+        mat = cfg.materials[tab.material if tab.material is not None else clayer.material]
+        Lp = max(tab.protrusion, 1e-9)
+        xsec = n_foils * tab.size_length * thickness
         if tab.polarity == "pos":
-            g_tab_pos += mat.sigma_elec * xsec / L
-            tab_heat_pos += mat.k_in * xsec / L
+            g_tab_pos += mat.sigma_elec * xsec / Lp
+            tab_heat_pos += mat.k_in * xsec / Lp
         else:
-            g_tab_neg += mat.sigma_elec * xsec / L
-            tab_heat_neg += mat.k_in * xsec / L
+            g_tab_neg += mat.sigma_elec * xsec / Lp
+            tab_heat_neg += mat.k_in * xsec / Lp
     if not cfg.enclosure.tab_heat_sink:
         tab_heat_pos = tab_heat_neg = 0.0   # tabs thermally isolated (no far-end heat sink)
 
@@ -322,37 +341,29 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         wall_thickness=(wall_real if shell else 0.0),
         wall_k=(can_mat.k_in if shell else 0.0),
         wall_rhocp=(can_mat.density * can_mat.cp if shell else 0.0),
+        stack_axis=sa, len_axis=la, hgt_axis=ha,
     )
 
 
-def _tab_edge_nodes(tab: Tab, columns, grid: Grid, outer_xy) -> List[Tuple[int, int]]:
-    """Return the roll's in-plane columns that lie under a tab footprint on its edge.
+def _tab_footprint_nodes(tab: Tab, columns, coords, la: int, ha: int,
+                         L_lh) -> List[Tuple[int, int]]:
+    """Return the electrode columns (a=length index, b=height index) under a tab footprint.
 
-    Falls back to the single nearest edge column if the tab band overlaps no column, so
-    every roll stays electrically terminated to the tab.
+    The footprint is centered at fractional (loc_length, loc_height) of the electrode extent,
+    with size (size_length x size_height). Falls back to the single nearest column if the
+    footprint overlaps none, so every roll stays terminated to the tab.
     """
-    Lx, Ly = outer_xy
     if not columns:
         return []
-    if tab.edge in ("y_min", "y_max"):
-        # edge runs along x; select the extreme-j columns and band along x
-        j_edge = min(j for _, j in columns) if tab.edge == "y_min" else max(j for _, j in columns)
-        edge_cols = [(i, j) for (i, j) in columns if j == j_edge]
-        center = tab.position * Lx
-        lo, hi = center - tab.width / 2, center + tab.width / 2
-        band = [(i, j) for (i, j) in edge_cols if lo <= grid.xc[i] <= hi]
-        if not band:
-            i_near = min(edge_cols, key=lambda c: abs(grid.xc[c[0]] - center))
-            band = [i_near]
-        return band
-    else:
-        # x_min / x_max: edge runs along y; band along y
-        i_edge = min(i for i, _ in columns) if tab.edge == "x_min" else max(i for i, _ in columns)
-        edge_cols = [(i, j) for (i, j) in columns if i == i_edge]
-        center = tab.position * Ly
-        lo, hi = center - tab.width / 2, center + tab.width / 2
-        band = [(i, j) for (i, j) in edge_cols if lo <= grid.yc[j] <= hi]
-        if not band:
-            j_near = min(edge_cols, key=lambda c: abs(grid.yc[c[1]] - center))
-            band = [j_near]
-        return band
+    L_la, L_ha = L_lh
+    cl = tab.loc_length * L_la
+    ch = tab.loc_height * L_ha
+    lo_l, hi_l = cl - tab.size_length / 2.0, cl + tab.size_length / 2.0
+    lo_h, hi_h = ch - tab.size_height / 2.0, ch + tab.size_height / 2.0
+    la_c, ha_c = coords[la], coords[ha]
+    band = [(a, b) for (a, b) in columns
+            if lo_l <= la_c[a] <= hi_l and lo_h <= ha_c[b] <= hi_h]
+    if not band:
+        near = min(columns, key=lambda c: (la_c[c[0]] - cl) ** 2 + (ha_c[c[1]] - ch) ** 2)
+        band = [near]
+    return band

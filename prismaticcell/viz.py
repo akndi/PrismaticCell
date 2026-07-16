@@ -62,18 +62,49 @@ def _final_T_field(result) -> np.ndarray:
     raise ValueError(f"unexpected T_field ndim={tf.ndim}; expected 3 or 4")
 
 
+_AXNAME = {0: "x", 1: "y", 2: "z"}
+
+
+def _axes(geom):
+    """(stack, length, height) physical axis indices, defaulting to (z,x,y)."""
+    return (getattr(geom, "stack_axis", 2), getattr(geom, "len_axis", 0), getattr(geom, "hgt_axis", 1))
+
+
 def _extent_mm(geom):
-    """Physical in-plane extent [xmin, xmax, ymin, ymax] in millimetres."""
+    """Physical electrode-plane extent [len_min,len_max, hgt_min,hgt_max] in millimetres."""
     grid = geom.grid
-    lx = grid.nx * grid.dx
-    ly = grid.ny * grid.dy
-    return [0.0, lx * 1e3, 0.0, ly * 1e3]
+    _, la, ha = _axes(geom)
+    dn = ((grid.nx, grid.dx), (grid.ny, grid.dy), (grid.nz, grid.dz))
+    return [0.0, dn[la][0] * dn[la][1] * 1e3, 0.0, dn[ha][0] * dn[ha][1] * 1e3]
 
 
-def _cell_center_mm(geom, i, j):
-    """(x,y) cell-centre location in millimetres for in-plane index (i,j)."""
+def _cell_center_mm(geom, a, b):
+    """(length, height) cell-centre location [mm] for electrode indices (a,b)."""
     grid = geom.grid
-    return float(grid.xc[i] * 1e3), float(grid.yc[j] * 1e3)
+    coords = (grid.xc, grid.yc, grid.zc)
+    _, la, ha = _axes(geom)
+    return float(coords[la][a] * 1e3), float(coords[ha][b] * 1e3)
+
+
+def _electrode_plane(geom, field3d, how="mid"):
+    """Reduce a (nx,ny,nz) field to the electrode plane (length x height).
+
+    how="mid": slice at the mid index along the stack axis; how="mean": average over the
+    stack axis (NaN-aware). Returns (plane[a,b], info_string).
+    """
+    sa, la, ha = _axes(geom)
+    if how == "mean":
+        mask = np.asarray(geom.active_mask, dtype=bool)
+        fm = np.where(mask, field3d, np.nan)
+        with np.errstate(invalid="ignore"):
+            plane = np.nanmean(fm, axis=sa)
+        info = "mean over thickness"
+    else:
+        s = field3d.shape[sa] // 2
+        plane = np.take(field3d, s, axis=sa)
+        info = f"mid-thickness ({_AXNAME[sa]} index {s})"
+    # remaining axes are (la, ha) in ascending order -> plane[a, b]
+    return plane, info
 
 
 def _save(fig, path):
@@ -141,40 +172,31 @@ def plot_temperature_slice(result, k_index: Optional[int] = None, path: Optional
     a marker at the hotspot (hottest cell in the displayed slice).
     """
     geom = result.geom
-    grid = geom.grid
+    sa, la, ha = _axes(geom)
     tfield = _final_T_field(result)  # (nx, ny, nz)
-    nz = tfield.shape[2]
-    if k_index is None:
-        k_index = nz // 2
-    k_index = int(np.clip(k_index, 0, nz - 1))
-
-    slice_xy = _k_to_c(tfield[:, :, k_index])  # (nx, ny) in Celsius
+    if k_index is not None:
+        plane = np.take(tfield, int(np.clip(k_index, 0, tfield.shape[sa] - 1)), axis=sa)
+        info = f"{_AXNAME[sa]} index {k_index}"
+    else:
+        plane, info = _electrode_plane(geom, tfield, how="mid")
+    slice_ab = _k_to_c(plane)          # electrode plane [a(length), b(height)] in Celsius
     extent = _extent_mm(geom)
 
     fig, ax = plt.subplots(figsize=(7.5, 6))
-    # array is indexed [i(x), j(y)]; transpose so x is horizontal, y vertical.
-    im = ax.imshow(
-        slice_xy.T,
-        origin="lower",
-        extent=extent,
-        aspect="auto",
-        cmap=_CMAP_TEMP,
-    )
+    im = ax.imshow(slice_ab.T, origin="lower", extent=extent, aspect="auto", cmap=_CMAP_TEMP)
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label("Temperature [°C]")
 
-    # hotspot within the displayed slice
-    ihot, jhot = np.unravel_index(np.argmax(slice_xy), slice_xy.shape)
-    xhot, yhot = _cell_center_mm(geom, ihot, jhot)
-    thot = float(slice_xy[ihot, jhot])
+    ahot, bhot = np.unravel_index(np.argmax(slice_ab), slice_ab.shape)
+    xhot, yhot = _cell_center_mm(geom, ahot, bhot)
+    thot = float(slice_ab[ahot, bhot])
     ax.plot(xhot, yhot, marker="x", markersize=12, markeredgewidth=2.5,
             color="cyan", label=f"hotspot {thot:.2f} °C")
     ax.legend(loc="upper right", fontsize=8)
 
-    z_mm = float(grid.zc[k_index] * 1e3)
-    ax.set_xlabel("x [mm]")
-    ax.set_ylabel("y [mm]")
-    ax.set_title(f"Temperature slice at k={k_index} (z = {z_mm:.2f} mm)")
+    ax.set_xlabel(f"length ({_AXNAME[la]}) [mm]")
+    ax.set_ylabel(f"height ({_AXNAME[ha]}) [mm]")
+    ax.set_title(f"Temperature on the electrode plane ({info})")
     fig.tight_layout()
     return _save(fig, path)
 
@@ -189,16 +211,9 @@ def plot_current_distribution(result, path: Optional[str] = None):
     reachable.
     """
     geom = result.geom
+    sa, la, ha = _axes(geom)
     j_field = np.asarray(result.j_field_final, dtype=float)  # (nx, ny, nz)
-
-    mask = np.asarray(geom.active_mask, dtype=bool)
-    j_masked = np.where(mask, j_field, np.nan)
-    with np.errstate(invalid="ignore"):
-        # mean over through-plane axis; all-NaN columns -> NaN (blanked)
-        inplane = np.full(j_masked.shape[:2], np.nan)
-        valid_cols = np.any(mask, axis=2)
-        if valid_cols.any():
-            inplane[valid_cols] = np.nanmean(j_masked, axis=2)[valid_cols]
+    inplane, _ = _electrode_plane(geom, j_field, how="mean")  # electrode plane [a,b]
 
     extent = _extent_mm(geom)
     fig, ax = plt.subplots(figsize=(7.5, 6))
@@ -233,9 +248,9 @@ def plot_current_distribution(result, path: Optional[str] = None):
     except Exception:
         pass  # tab overlay is best-effort only
 
-    ax.set_xlabel("x [mm]")
-    ax.set_ylabel("y [mm]")
-    ax.set_title("Areal current density (through-plane mean over active cells)")
+    ax.set_xlabel(f"length ({_AXNAME[la]}) [mm]")
+    ax.set_ylabel(f"height ({_AXNAME[ha]}) [mm]")
+    ax.set_title("Areal current density on the electrode plane (mean over thickness)")
     fig.tight_layout()
     return _save(fig, path)
 

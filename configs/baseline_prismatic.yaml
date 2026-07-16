@@ -20,7 +20,8 @@ ecm:
       ea_c: 0.0
 
 assembly:
-  arrangement: side_by_side_x
+  stack_axis: z             # sandwiches stack along z (through-plane); electrode plane = x-y
+  arrangement: side_by_side_length   # the two rolls sit side by side along the length (x)
   inter_gap: 1.5e-3         # m, gap between the two jellyrolls
   wall_clearance: 5.0e-4    # m, roll-to-can clearance
   jellyrolls:
@@ -54,8 +55,9 @@ enclosure:
   tab_heat_sink: true          # tabs conduct heat to ambient at their far end
 
 tabs:
-  - {polarity: pos, edge: y_max, position: 0.25, width: 0.020, thickness: 0.2e-3, length: 0.010, material: al_collector}
-  - {polarity: neg, edge: y_max, position: 0.75, width: 0.020, thickness: 0.2e-3, length: 0.010, material: cu_collector}
+  # footprint on the electrode (length x height) plane; thickness/material default to the collector
+  - {polarity: pos, loc_length: 0.25, loc_height: 0.95, size_length: 0.020, size_height: 0.010, protrusion: 0.010}
+  - {polarity: neg, loc_length: 0.75, loc_height: 0.95, size_length: 0.020, size_height: 0.010, protrusion: 0.010}
 
 mesh:
   nx: 12

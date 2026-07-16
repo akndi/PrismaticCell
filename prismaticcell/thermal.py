@@ -258,9 +258,9 @@ class ThermalOperator:
                 return
             cells = []
             for roll, nodes in node_lists:
-                for (i, j) in nodes:
-                    for k in roll.col_zcells.get((i, j), []):
-                        cells.append(idx[i, j, k])
+                for (a, b) in nodes:                       # electrode (length,height) columns
+                    for s in roll.col_zcells.get((a, b), []):
+                        cells.append(idx[geom.phys_index(a, b, s)])
             if not cells:
                 return
             g_each = g_total / len(cells)

@@ -1,0 +1,87 @@
+# Large flat prismatic LFP cell (long format):
+#   X = electrode length ~720 mm, Z = electrode height ~120 mm, Y = through-plane thickness ~15 mm.
+#   Two jellyrolls back-to-back along Y, 34 stacks each; sandwich = CC | cathode | sep | anode | CC.
+# Cell (with walls/gap) ~ 730 x 130 x 15.3 mm.  Capacity is a representative estimate -- set your own.
+name: large_prismatic_lfp
+
+include:
+  - materials.yaml
+
+ecm:
+  capacity_Ah: 200.0        # representative for this footprint/loading -- replace with your value
+  ocv_table: ../data/lfp_ocv.csv
+  entropy_table: ../data/lfp_entropy.csv
+  r0_table: ../data/lfp_r0.csv
+  ea_r0: 20000.0
+  t_ref: 298.15
+  rc_pairs:
+    - {r_table: ../data/lfp_rc1_r.csv, c_table: ../data/lfp_rc1_c.csv, ea_r: 22000.0, ea_c: 0.0}
+
+assembly:
+  stack_axis: y             # through-plane / thickness / stacking axis = Y
+  arrangement: stacked      # two jellyrolls back-to-back along Y
+  inter_gap: 1.0e-3         # m, gap between the two jellyrolls
+  wall_clearance: 5.0e-4    # m, roll-to-can clearance
+  jellyrolls:
+    - n_stacks: 34
+      stack:
+        width: 0.720        # m, electrode LENGTH (X)
+        height: 0.120       # m, electrode HEIGHT (Z)
+        layers:
+          - {role: pos_collector,   material: al_collector,   thickness: 13.0e-6}
+          - {role: cathode_coating, material: lfp_cathode,    thickness: 92.0e-6}
+          - {role: separator,       material: separator,      thickness: 14.0e-6}
+          - {role: anode_coating,   material: graphite_anode, thickness: 73.0e-6}
+          - {role: neg_collector,   material: cu_collector,   thickness: 6.0e-6}
+    - n_stacks: 34
+      stack:
+        width: 0.720
+        height: 0.120
+        layers:
+          - {role: pos_collector,   material: al_collector,   thickness: 13.0e-6}
+          - {role: cathode_coating, material: lfp_cathode,    thickness: 92.0e-6}
+          - {role: separator,       material: separator,      thickness: 14.0e-6}
+          - {role: anode_coating,   material: graphite_anode, thickness: 73.0e-6}
+          - {role: neg_collector,   material: cu_collector,   thickness: 6.0e-6}
+
+enclosure:
+  kind: prismatic
+  material: can_al
+  wall_thickness: 1.0e-3
+  contact_conductance: 150.0
+  wall_model: shell
+  tab_heat_sink: true
+
+tabs:
+  # Footprint on the electrode (length x height) plane; thickness/material DEFAULT to the
+  # current collector (Al 13 um for +, Cu 6 um for -). loc_* are fractional 0..1; size_* in m.
+  # Here both tabs sit near the top edge (height ~ 0.95), at 15% and 85% along the length.
+  - {polarity: pos, loc_length: 0.15, loc_height: 0.95, size_length: 0.05, size_height: 0.010, protrusion: 0.012}
+  - {polarity: neg, loc_length: 0.85, loc_height: 0.95, size_length: 0.05, size_height: 0.010, protrusion: 0.012}
+
+mesh:
+  nx: 24                    # along length (X)
+  ny: 10                    # along thickness (Y, through-plane) -- resolves the stack
+  nz: 12                    # along height (Z)
+
+cooling:
+  # Face names are physical: y_min/y_max are the Y-normal faces (the large flat X-Z faces here);
+  # top/bottom are the +z/-z faces (the height ends); x_min/x_max are the length ends.
+  y_min: {kind: convection, h: 25.0, t_inf: 298.15}   # large flat face (normal = thickness Y)
+  y_max: {kind: convection, h: 25.0, t_inf: 298.15}   # large flat face
+  x_min: {kind: adiabatic}    # length end
+  x_max: {kind: adiabatic}    # length end
+  top:    {kind: adiabatic}   # +z height end
+  bottom: {kind: adiabatic}   # -z height end
+
+load:
+  kind: constant_crate
+  value: 1.0
+
+solver:
+  mode: transient
+  dt: 30.0
+  t_end: 3600.0
+  collector_model: planar
+
+t_init: 298.15

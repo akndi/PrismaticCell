@@ -169,7 +169,14 @@ def solve_network(
 
     grid = geom.grid
     nx, ny, nz = grid.nx, grid.ny, grid.nz
-    dx, dy = grid.dx, grid.dy
+    # Electrode-plane axes: (a=length index, b=height index) in-plane; s=stack index along the
+    # through-plane axis. d_la/d_ha are the in-plane grid spacings; phys() maps (a,b,s)->(i,j,k).
+    sa, la, ha = geom.stack_axis, geom.len_axis, geom.hgt_axis
+    _dvec = (grid.dx, grid.dy, grid.dz)
+    _nvec = (nx, ny, nz)
+    d_la, d_ha = _dvec[la], _dvec[ha]
+    n_la, n_ha = _nvec[la], _nvec[ha]
+    phys = geom.phys_index
     T_field = np.asarray(T_field, dtype=np.float64)
 
     # ---- degeneracy guards (prevent silently-singular systems) -----------------
@@ -256,10 +263,11 @@ def solve_network(
         colset = set(roll.columns)
         sc_p = roll.sheet_cond_pos
         sc_n = roll.sheet_cond_neg
-        Gx_p, Gy_p = sc_p * (dy / dx), sc_p * (dx / dy)
-        Gx_n, Gy_n = sc_n * (dy / dx), sc_n * (dx / dy)
+        # foil edge conductance = sheet_cond * (transverse length / spacing) along each in-plane axis
+        Gx_p, Gy_p = sc_p * (d_ha / d_la), sc_p * (d_la / d_ha)
+        Gx_n, Gy_n = sc_n * (d_ha / d_la), sc_n * (d_la / d_ha)
 
-        # in-plane 4-neighbour coupling (add each undirected edge once via +x,+y)
+        # in-plane 4-neighbour coupling (add each undirected edge once via +length,+height)
         for (i, j) in roll.columns:
             p = pos_dof[(r, (i, j))]
             q = neg_dof[(r, (i, j))]
@@ -281,9 +289,10 @@ def solve_network(
             q = neg_dof[(r, (i, j))]
             g_ij = 0.0
             isrc_ij = 0.0
-            for k in roll.col_zcells[(i, j)]:
-                a = aidx[i, j, k]
-                area = roll.area_eff[i, j, k]
+            for s in roll.col_zcells[(i, j)]:
+                cell = phys(i, j, s)
+                a = aidx[cell]
+                area = roll.area_eff[cell]
                 b = area / r0_active[a]                      # conductance part
                 g_ij += b
                 isrc_ij += b * (ocv_active[a] - usum[a])     # source part
@@ -337,8 +346,8 @@ def solve_network(
 
     for roll in geom.rolls:
         r = roll.roll_index
-        pp = np.full((nx, ny), np.nan)
-        pn = np.full((nx, ny), np.nan)
+        pp = np.full((n_la, n_ha), np.nan)      # collector potential over the electrode plane
+        pn = np.full((n_la, n_ha), np.nan)
         for c in roll.columns:
             pp[c] = x[pos_dof[(r, c)]]
             pn[c] = x[neg_dof[(r, c)]]
@@ -348,20 +357,21 @@ def solve_network(
         # local current densities from shared column Δφ
         for (i, j) in roll.columns:
             dphi = pp[i, j] - pn[i, j]
-            for k in roll.col_zcells[(i, j)]:
-                a = aidx[i, j, k]
+            for s in roll.col_zcells[(i, j)]:
+                cell = phys(i, j, s)
+                a = aidx[cell]
                 j_local = (ocv_active[a] - usum[a] - dphi) / r0_active[a]
-                j_area[i, j, k] = j_local
-                i_cv[i, j, k] = j_local * roll.area_eff[i, j, k]
-                dphi_field[i, j, k] = dphi
+                j_area[cell] = j_local
+                i_cv[cell] = j_local * roll.area_eff[cell]
+                dphi_field[cell] = dphi
 
         # foil ohmic heat: split each edge's power to its two endpoint columns,
         # accumulate per column over both foils.
-        p_col = np.zeros((nx, ny))
+        p_col = np.zeros((n_la, n_ha))
         colset = set(roll.columns)
         sc_p, sc_n = roll.sheet_cond_pos, roll.sheet_cond_neg
-        Gx_p, Gy_p = sc_p * (dy / dx), sc_p * (dx / dy)
-        Gx_n, Gy_n = sc_n * (dy / dx), sc_n * (dx / dy)
+        Gx_p, Gy_p = sc_p * (d_ha / d_la), sc_p * (d_la / d_ha)
+        Gx_n, Gy_n = sc_n * (d_ha / d_la), sc_n * (d_la / d_ha)
         for (i, j) in roll.columns:
             for (ni, nj), Gp, Gn in (
                 ((i + 1, j), Gx_p, Gx_n),
@@ -373,16 +383,17 @@ def solve_network(
                     p_edge = Gp * dpp * dpp + Gn * dpn * dpn
                     p_col[i, j] += 0.5 * p_edge
                     p_col[ni, nj] += 0.5 * p_edge
-        # distribute each column's foil heat to its active z-cells (area-weighted),
+        # distribute each column's foil heat to its active stack cells (area-weighted),
         # then convert to volumetric density.
         for (i, j) in roll.columns:
             if p_col[i, j] == 0.0:
                 continue
-            ks = roll.col_zcells[(i, j)]
-            area_tot = sum(roll.area_eff[i, j, k] for k in ks)
-            for k in ks:
-                w = (roll.area_eff[i, j, k] / area_tot) if area_tot > 0 else (1.0 / len(ks))
-                q_ohm_vol[i, j, k] += p_col[i, j] * w / vol
+            ss = roll.col_zcells[(i, j)]
+            cells = [phys(i, j, s) for s in ss]
+            area_tot = sum(roll.area_eff[c] for c in cells)
+            for c in cells:
+                w = (roll.area_eff[c] / area_tot) if area_tot > 0 else (1.0 / len(ss))
+                q_ohm_vol[c] += p_col[i, j] * w / vol
 
     i_terminal = float(i_cv.sum())
 
@@ -411,7 +422,12 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
     """
     grid = geom.grid
     nx, ny, nz = grid.nx, grid.ny, grid.nz
-    dx, dy = grid.dx, grid.dy
+    sa, la, ha = geom.stack_axis, geom.len_axis, geom.hgt_axis
+    _dvec = (grid.dx, grid.dy, grid.dz)
+    _nvec = (nx, ny, nz)
+    d_la, d_ha = _dvec[la], _dvec[ha]
+    n_la, n_ha = _nvec[la], _nvec[ha]
+    phys = geom.phys_index
     vol = grid.volume()
     T_field = np.asarray(T_field, dtype=np.float64)
 
@@ -484,10 +500,10 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
         nlz = max(len(roll_layers[r]), 1)
         sc_p = roll.sheet_cond_pos / nlz          # per-layer foil sheet conductance
         sc_n = roll.sheet_cond_neg / nlz
-        Gx_p, Gy_p = sc_p * (dy / dx), sc_p * (dx / dy)
-        Gx_n, Gy_n = sc_n * (dy / dx), sc_n * (dx / dy)
+        Gx_p, Gy_p = sc_p * (d_ha / d_la), sc_p * (d_la / d_ha)
+        Gx_n, Gy_n = sc_n * (d_ha / d_la), sc_n * (d_la / d_ha)
         for k in roll_layers[r]:
-            # in-plane 4-neighbour foil coupling within this layer
+            # in-plane 4-neighbour foil coupling within this layer (k = stack-cell index)
             for (i, j) in roll.columns:
                 if not is_active(roll, k, (i, j)):
                     continue
@@ -500,8 +516,8 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
                         add(p, p, Gp); add(p2, p2, Gp); add(p, p2, -Gp); add(p2, p, -Gp)
                         add(q, q, Gn); add(q2, q2, Gn); add(q, q2, -Gn); add(q2, q, -Gn)
                 # column source/sink: a single CV per (layer, column)
-                a = aidx[i, j, k]
-                b = roll.area_eff[i, j, k] / r0_active[a]
+                a = aidx[phys(i, j, k)]
+                b = roll.area_eff[phys(i, j, k)] / r0_active[a]
                 isrc = b * (ocv_active[a] - usum[a])
                 add(p, p, b); add(p, q, -b); rhs[p] += isrc
                 add(q, q, b); add(q, p, -b); rhs[q] += -isrc
@@ -543,9 +559,9 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
         nlz = max(len(roll_layers[r]), 1)
         sc_p = roll.sheet_cond_pos / nlz
         sc_n = roll.sheet_cond_neg / nlz
-        Gx_p, Gy_p = sc_p * (dy / dx), sc_p * (dx / dy)
-        Gx_n, Gy_n = sc_n * (dy / dx), sc_n * (dx / dy)
-        pp_sum = np.zeros((nx, ny)); pn_sum = np.zeros((nx, ny)); cnt = np.zeros((nx, ny))
+        Gx_p, Gy_p = sc_p * (d_ha / d_la), sc_p * (d_la / d_ha)
+        Gx_n, Gy_n = sc_n * (d_ha / d_la), sc_n * (d_la / d_ha)
+        pp_sum = np.zeros((n_la, n_ha)); pn_sum = np.zeros((n_la, n_ha)); cnt = np.zeros((n_la, n_ha))
         for k in roll_layers[r]:
             for (i, j) in roll.columns:
                 if not is_active(roll, k, (i, j)):
@@ -553,11 +569,12 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
                 pv = x[pos_dof[(r, k, (i, j))]]
                 nv = x[neg_dof[(r, k, (i, j))]]
                 dphi = pv - nv
-                a = aidx[i, j, k]
+                cell = phys(i, j, k)
+                a = aidx[cell]
                 jl = (ocv_active[a] - usum[a] - dphi) / r0_active[a]
-                j_area[i, j, k] = jl
-                i_cv[i, j, k] = jl * roll.area_eff[i, j, k]
-                dphi_field[i, j, k] = dphi
+                j_area[cell] = jl
+                i_cv[cell] = jl * roll.area_eff[cell]
+                dphi_field[cell] = dphi
                 pp_sum[i, j] += pv; pn_sum[i, j] += nv; cnt[i, j] += 1.0
                 # per-layer foil ohmic heat, split to endpoint CVs of this layer
                 for (ni, nj), Gp, Gn in (((i + 1, j), Gx_p, Gx_n), ((i, j + 1), Gy_p, Gy_n)):
@@ -565,9 +582,9 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
                         dpp = pv - x[pos_dof[(r, k, (ni, nj))]]
                         dpn = nv - x[neg_dof[(r, k, (ni, nj))]]
                         pe = Gp * dpp * dpp + Gn * dpn * dpn
-                        q_ohm_vol[i, j, k] += 0.5 * pe / vol
-                        q_ohm_vol[ni, nj, k] += 0.5 * pe / vol
-        pp = np.full((nx, ny), np.nan); pn = np.full((nx, ny), np.nan)
+                        q_ohm_vol[phys(i, j, k)] += 0.5 * pe / vol
+                        q_ohm_vol[phys(ni, nj, k)] += 0.5 * pe / vol
+        pp = np.full((n_la, n_ha), np.nan); pn = np.full((n_la, n_ha), np.nan)
         m = cnt > 0
         pp[m] = pp_sum[m] / cnt[m]                  # thickness-averaged (for plotting)
         pn[m] = pn_sum[m] / cnt[m]

@@ -9,11 +9,17 @@ temperature field, thermal gradients/hotspots, and electrochemical performance.
 
 ```
 Prismatic cell (metal can)
- └─ 2 jellyrolls  (parallel to the tabs, thermally coupled through the can)
+ └─ N jellyrolls  (parallel to the tabs, thermally coupled through the can)
      └─ each jellyroll = many stacked sandwiches
          └─ sandwich = Cathode-CC | Cathode | Separator | Anode | Anode-CC
 Control volumes = full 3-D structured grid → one ECM per active control volume
 ```
+
+The **stack axis is configurable** (`assembly.stack_axis`): e.g. a long flat cell uses
+`stack_axis: y` so length = X, height = Z, thickness = Y (two jellyrolls back-to-back along Y),
+with anisotropy, cooling faces and plots all in those physical axes. See
+[`configs/large_prismatic.yaml`](configs/large_prismatic.yaml) (a 720 × 120 mm, 2 × 34-stack cell).
+**Tabs** are footprints on the electrode plane (thickness defaults to the collector's).
 
 - **Distributed ECM network** — every active control volume runs its own equivalent-circuit
   model (OCV, R0, RC pairs, entropy) at its *local* SOC and temperature. CVs are networked

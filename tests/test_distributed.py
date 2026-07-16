@@ -165,7 +165,7 @@ def test_tab_resistance_affects_terminal_voltage(baseline_cfg):
     cfg.mesh.nx, cfg.mesh.ny, cfg.mesh.nz = 8, 10, 6
     cfg_long = copy.deepcopy(cfg)
     for t in cfg_long.tabs:
-        t.length *= 50.0                                # much higher R_tab = L/(sigma w t)
+        t.protrusion *= 50.0                            # much higher R_tab = protrusion/(sigma*w*t)
     geom_a, model = build_geometry(cfg), ECMModel.from_config(cfg)
     geom_b = build_geometry(cfg_long)
     assert geom_b.g_tab_pos < geom_a.g_tab_pos          # longer tab -> lower conductance
