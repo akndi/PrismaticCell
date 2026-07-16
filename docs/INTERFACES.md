@@ -68,10 +68,12 @@ nodes = the electrode columns under each tab's rectangular footprint (fractional
 to the same terminal). Anisotropy and the electrode plane follow `assembly.stack_axis` (the
 through-plane axis); the two in-plane axes are the electrode length and height.
 
-An optional `enclosure.insulator` (bottom/top film) is exposed as a sub-grid layer on the height
-face it occupies: `insulator_face` (physical face name), `insulator_R_area = t_ins/k_ins`
-[K·m²/W], and `insulator_rhocp_t = ρc·t_ins` [J/m²/K]. `thermal.py` adds the resistance in series
-on that face's BC and lumps the areal mass onto its cells (it is not meshed as a region).
+Optional sub-grid layers — `enclosure.insulator` (bottom/top film) and `assembly.roll_wrap` (film
+on each roll's side faces) — are aggregated into `geom.face_R_area` and `geom.face_rhocp_t`, dicts
+keyed by physical face name (`t/k` [K·m²/W] and `ρc·t` [J/m²/K], summed where layers coincide).
+`thermal.py` adds `face_R_area[f]` in series on face `f`'s BC and lumps `face_rhocp_t[f]` onto its
+cells (neither is meshed as a region). The insulator's single-face values are also kept as
+`insulator_face` / `insulator_R_area` / `insulator_rhocp_t` for reference.
 
 ---
 

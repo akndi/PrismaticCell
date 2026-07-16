@@ -57,3 +57,10 @@ materials:
     k_through: 0.20        # W/m/K
     k_in: 0.20
     sigma_elec: 0.0
+
+  mylar_film:              # PET (mylar) jellyroll wrap film (electrically insulating)
+    density: 1390.0        # kg/m^3
+    cp: 1170.0             # J/kg/K
+    k_through: 0.15        # W/m/K
+    k_in: 0.15
+    sigma_elec: 0.0

@@ -88,6 +88,27 @@ class Jellyroll:
 
 
 @dataclass
+class Wrap:
+    """A thin film wrapped around each jellyroll's side faces (e.g. mylar/PET tape).
+
+    Holds the winding/stack together and electrically isolates the roll from the can. Thermally it
+    is a sub-grid conductive layer that adds series resistance ``t/k`` on the roll-to-can heat path
+    over the wrapped faces. ``coverage`` selects which roll faces it covers, named by orientation
+    (independent of ``stack_axis``):
+      - ``"sides"``     (default) = the big front/back faces (normal to the thickness/stack axis)
+                        AND the small end faces (normal to the length axis); top/bottom open.
+      - ``"big_faces"`` = only the big front/back faces (normal to the stack axis).
+      - ``"ends"``      = only the small end faces (normal to the length axis).
+      - ``"all"``       = all six faces (adds the height ends too).
+    Only the roll faces that border the can/ambient (the external cell faces) carry the resistance;
+    the internal inter-roll faces are neglected (their wrap resistance is tiny next to the air gap).
+    """
+    material: str               # key into material database
+    thickness: float            # m, film thickness
+    coverage: Literal["sides", "big_faces", "ends", "all"] = "sides"
+
+
+@dataclass
 class Assembly:
     """The internals of the can: one or more jellyrolls and how they are arranged.
 
@@ -102,6 +123,7 @@ class Assembly:
     arrangement: Literal["stacked", "side_by_side_length", "side_by_side_height"] = "stacked"
     inter_gap: float = 1e-3     # m, gap between adjacent jellyrolls
     wall_clearance: float = 5e-4  # m, gap between roll bounding box and can wall
+    roll_wrap: Optional["Wrap"] = None  # film wrapped around each jellyroll's side faces; None=absent
 
 
 @dataclass
@@ -432,6 +454,12 @@ class SimConfig:
                 errors.append(f"enclosure.insulator references unknown material '{ins.material}'")
             if ins.thickness <= 0:
                 errors.append("enclosure.insulator.thickness must be > 0")
+        wrap = self.assembly.roll_wrap
+        if wrap is not None:
+            if wrap.material not in known:
+                errors.append(f"assembly.roll_wrap references unknown material '{wrap.material}'")
+            if wrap.thickness <= 0:
+                errors.append("assembly.roll_wrap.thickness must be > 0")
         # need at least one pos and one neg tab
         pol = {t.polarity for t in self.tabs}
         if "pos" not in pol or "neg" not in pol:

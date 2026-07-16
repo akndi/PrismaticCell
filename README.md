@@ -33,8 +33,9 @@ with anisotropy, cooling faces and plots all in those physical axes. See
   path to the cooled faces + wall mass) so it contributes without needing >100 in-plane cells;
   tabs carry electrical *and* thermal resistance. Internal gaps are effective-conduction media.
   An optional **bottom/top insulator** (`enclosure.insulator`, e.g. a 0.5 mm polypropylene film on
-  the can floor) is a sub-grid conductive layer that adds its `t/k` resistance in series on that
-  face — throttling heat removal when that face is cooled.
+  the can floor) and a **jellyroll wrap** (`assembly.roll_wrap`, e.g. 50 µm mylar on the roll's
+  side faces) are sub-grid conductive layers that add their `t/k` resistance in series on the
+  relevant faces — throttling heat removal where those faces are cooled.
 - **Two collector fidelities** (`solver.collector_model`) — `planar` (2.5-D: one shared foil
   potential per jellyroll; fast) or `layered` (full 3-D collector: a separate foil potential per
   through-thickness stack layer, parallel at the tabs — resolves through-thickness potential

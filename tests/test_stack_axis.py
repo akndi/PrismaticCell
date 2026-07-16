@@ -25,6 +25,7 @@ def _mats():
         "can_al": Material("can_al", 2700, 900, 238, 238, 0.0),
         "gap_air": Material("gap_air", 1.2, 1005, 0.03, 0.03, 0.0),
         "pp_insulator": Material("pp_insulator", 905, 1900, 0.20, 0.20, 0.0),
+        "mylar_film": Material("mylar_film", 1390, 1170, 0.15, 0.15, 0.0),
     }
 
 
@@ -210,6 +211,57 @@ def test_insulator_throttles_bottom_cooling():
     r_no = coupling.run(mk(False))
     r_ins = coupling.run(mk(True))
     assert r_ins.T_max[-1] > r_no.T_max[-1] + 1e-3      # insulator -> less heat out -> hotter
+
+
+def test_roll_wrap_covers_side_faces():
+    """A 'sides' mylar wrap adds series resistance on the big (stack-axis) AND end (length-axis)
+    external faces, but not the height ends; each equals t/k."""
+    from prismaticcell.config import Wrap
+    cfg = _cfg("y", width=0.20, height=0.12)   # stack=Y, length=X, height=Z
+    cfg.assembly.roll_wrap = Wrap("mylar_film", thickness=5e-5, coverage="sides")
+    g = build_geometry(cfg)
+    R = 5e-5 / 0.15
+    # big faces (normal to stack axis Y) = y_min/y_max; end faces (normal to length X) = x_min/x_max
+    assert np.isclose(g.face_R_area["y_min"], R) and np.isclose(g.face_R_area["y_max"], R)
+    assert np.isclose(g.face_R_area["x_min"], R) and np.isclose(g.face_R_area["x_max"], R)
+    # height ends (top/bottom) are open -> no wrap there
+    assert g.face_R_area.get("top", 0.0) == 0.0 and g.face_R_area.get("bottom", 0.0) == 0.0
+
+
+def test_roll_wrap_and_insulator_compose_on_bottom():
+    """Insulator (bottom) and an 'all'-coverage wrap stack in series on the same bottom face."""
+    from prismaticcell.config import Wrap, Insulator
+    cfg = _cfg("y", width=0.20, height=0.12)
+    cfg.enclosure.insulator = Insulator("pp_insulator", thickness=5e-4, location="bottom")
+    cfg.assembly.roll_wrap = Wrap("mylar_film", thickness=5e-5, coverage="all")
+    g = build_geometry(cfg)
+    assert np.isclose(g.face_R_area["bottom"], 5e-4 / 0.20 + 5e-5 / 0.15)   # insulator + wrap
+
+
+def test_roll_wrap_throttles_side_cooling():
+    """A side-face wrap raises steady temperature when that side is the cooled face."""
+    from prismaticcell.config import Wrap
+
+    def mk(with_wrap):
+        cool = Cooling(y_min=FaceBC("convection", h=200.0, t_inf=298.15),
+                       y_max=FaceBC("convection", h=200.0, t_inf=298.15))
+        cfg = _cfg("y", width=0.20, height=0.12, cooling=cool)
+        cfg.solver.mode = "steady"
+        if with_wrap:
+            cfg.assembly.roll_wrap = Wrap("mylar_film", thickness=5e-4, coverage="big_faces")
+        return cfg
+
+    r_no = coupling.run(mk(False))
+    r_wrap = coupling.run(mk(True))
+    assert r_wrap.T_max[-1] > r_no.T_max[-1] + 1e-3
+
+
+def test_roll_wrap_unknown_material_rejected():
+    from prismaticcell.config import Wrap
+    cfg = _cfg("y", width=0.20, height=0.12)
+    cfg.assembly.roll_wrap = Wrap("nope", thickness=5e-5)
+    with pytest.raises(ValueError):
+        cfg.validate()
 
 
 def test_insulator_unknown_material_rejected():

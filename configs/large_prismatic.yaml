@@ -22,6 +22,10 @@ assembly:
   arrangement: stacked      # two jellyrolls back-to-back along Y
   inter_gap: 1.0e-3         # m, gap between the two jellyrolls
   wall_clearance: 5.0e-4    # m, roll-to-can clearance
+  roll_wrap:                # mylar (PET) film wrapped around each jellyroll's 4 side faces
+    material: mylar_film    # PET, k ~ 0.15 W/m.K
+    thickness: 5.0e-5       # m (50 um)
+    coverage: sides         # big front/back faces + small end faces (top/bottom open)
   jellyrolls:
     - n_stacks: 34
       stack:

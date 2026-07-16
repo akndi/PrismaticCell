@@ -202,12 +202,14 @@ class ThermalOperator:
             g_amb[cell_idx] += g_bc
             gt_amb[cell_idx] += g_bc * bc.t_inf
 
-        # Per-face extra series resistance from a bottom/top insulating slab (sub-grid layer).
-        ins_face = str(getattr(geom, "insulator_face", ""))
-        ins_R = float(getattr(geom, "insulator_R_area", 0.0))
-        xR = {f: 0.0 for f in ("bottom", "top", "x_min", "x_max", "y_min", "y_max")}
-        if ins_face in xR:
-            xR[ins_face] = ins_R
+        # Per-face extra series resistance from sub-grid layers (bottom/top insulator + roll wrap).
+        six_faces = ("bottom", "top", "x_min", "x_max", "y_min", "y_max")
+        face_R = dict(getattr(geom, "face_R_area", {}) or {})
+        if not face_R:   # backward-compat: fall back to the insulator-only scalar
+            _if = str(getattr(geom, "insulator_face", ""))
+            if _if:
+                face_R[_if] = float(getattr(geom, "insulator_R_area", 0.0))
+        xR = {f: float(face_R.get(f, 0.0)) for f in six_faces}
 
         # top = +z max, bottom = -z min; sides map to x/y min/max.
         # z faces use kz, x faces use kx, y faces use ky.
@@ -255,17 +257,24 @@ class ThermalOperator:
             Mw3[0, :, :] += mw * area_x; Mw3[-1, :, :] += mw * area_x
             Mw3[:, 0, :] += mw * area_y; Mw3[:, -1, :] += mw * area_y
 
-        # Insulating-slab thermal mass: lump the slab's areal heat capacity onto its face cells.
-        ins_mt = float(getattr(geom, "insulator_rhocp_t", 0.0))
-        if ins_face in xR and ins_mt > 0.0:
+        # Sub-grid layer thermal mass (insulator + roll wrap): lump each layer's areal heat
+        # capacity onto its face cells.
+        face_M = dict(getattr(geom, "face_rhocp_t", {}) or {})
+        if not face_M:   # backward-compat: insulator-only scalar
+            _if = str(getattr(geom, "insulator_face", ""))
+            if _if:
+                face_M[_if] = float(getattr(geom, "insulator_rhocp_t", 0.0))
+        if face_M:
             Mi3 = M_wall.reshape(nx, ny, nz)
             _face_slice = {
                 "bottom": (np.s_[:, :, 0], area_z), "top": (np.s_[:, :, -1], area_z),
                 "x_min": (np.s_[0, :, :], area_x), "x_max": (np.s_[-1, :, :], area_x),
                 "y_min": (np.s_[:, 0, :], area_y), "y_max": (np.s_[:, -1, :], area_y),
             }
-            sl, af = _face_slice[ins_face]
-            Mi3[sl] += ins_mt * af
+            for f, mt in face_M.items():
+                if f in _face_slice and mt > 0.0:
+                    sl, af = _face_slice[f]
+                    Mi3[sl] += mt * af
 
         # Tab conduction-to-ambient heat loss (PHYSICS §5): the tab's far end is heat-sunk near
         # the coolant temperature. Distribute each polarity's tab thermal conductance over its

@@ -99,6 +99,11 @@ class Geometry:
     insulator_face: str = ""           # physical face name it sits on ("bottom"/"top"/...), "" if none
     insulator_R_area: float = 0.0      # K*m^2/W, series resistance-area t_ins/k_ins on that face
     insulator_rhocp_t: float = 0.0     # J/m^2/K, areal heat capacity rho*cp*t_ins of the slab
+    # Aggregate per-face sub-grid layers (insulator + jellyroll wrap), summed by physical face.
+    # thermal.py adds face_R_area[f] in series on face f's BC and lumps face_rhocp_t[f] onto its
+    # cells. Empty dicts when nothing is configured.
+    face_R_area: Dict[str, float] = field(default_factory=dict)   # K*m^2/W per physical face
+    face_rhocp_t: Dict[str, float] = field(default_factory=dict)  # J/m^2/K per physical face
 
     @property
     def n_active(self) -> int:
@@ -336,6 +341,14 @@ def build_geometry(cfg: SimConfig) -> Geometry:
     # Bottom/top insulating slab: a sub-grid conductive layer on the height-axis face it occupies
     # (bottom = -height end, opposite the tabs). Its series resistance t_ins/k_ins throttles heat
     # flow to that face and its (small) heat capacity is lumped onto the face cells.
+    _face_names = {0: ("x_min", "x_max"), 1: ("y_min", "y_max"), 2: ("bottom", "top")}
+    face_R_area: Dict[str, float] = {}
+    face_rhocp_t: Dict[str, float] = {}
+
+    def _add_face_layer(face: str, R_area: float, rhocp_t: float) -> None:
+        face_R_area[face] = face_R_area.get(face, 0.0) + R_area
+        face_rhocp_t[face] = face_rhocp_t.get(face, 0.0) + rhocp_t
+
     ins_cfg = cfg.enclosure.insulator
     ins_face = ""
     ins_R_area = 0.0
@@ -344,8 +357,23 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         ins_mat = cfg.materials[ins_cfg.material]
         ins_R_area = ins_cfg.thickness / ins_mat.k_through   # through-plane resistance-area
         ins_rhocp_t = ins_mat.density * ins_mat.cp * ins_cfg.thickness
-        _face_names = {0: ("x_min", "x_max"), 1: ("y_min", "y_max"), 2: ("bottom", "top")}
         ins_face = _face_names[ha][0 if ins_cfg.location == "bottom" else 1]
+        _add_face_layer(ins_face, ins_R_area, ins_rhocp_t)
+
+    # Jellyroll wrap (e.g. mylar): a film on each roll's side faces. Only the roll faces that border
+    # the can/ambient (the external cell faces) carry the resistance; internal inter-roll faces are
+    # neglected. Coverage is named by orientation: big faces = +/-stack axis, ends = +/-length axis,
+    # height ends = +/-height axis.
+    wrap_cfg = cfg.assembly.roll_wrap
+    if wrap_cfg is not None:
+        w_mat = cfg.materials[wrap_cfg.material]
+        w_R = wrap_cfg.thickness / w_mat.k_through
+        w_mt = w_mat.density * w_mat.cp * wrap_cfg.thickness
+        axes = {"sides": (sa, la), "big_faces": (sa,), "ends": (la,), "all": (sa, la, ha)}[
+            wrap_cfg.coverage]
+        for ax in axes:
+            for face in _face_names[ax]:
+                _add_face_layer(face, w_R, w_mt)
 
     return Geometry(
         grid=grid,
@@ -365,6 +393,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         wall_rhocp=(can_mat.density * can_mat.cp if shell else 0.0),
         stack_axis=sa, len_axis=la, hgt_axis=ha,
         insulator_face=ins_face, insulator_R_area=ins_R_area, insulator_rhocp_t=ins_rhocp_t,
+        face_R_area=face_R_area, face_rhocp_t=face_rhocp_t,
     )
 
 

@@ -22,7 +22,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
 
-RED, GREEN, GREY = "#c0392b", "#5aa469", "#c9ccd1"
+RED, GREEN, GREY, MYLAR, BLUE = "#c0392b", "#5aa469", "#c9ccd1", "#8e44ad", "#3b7fd4"
 ROLE_COL = {
     "pos_collector": "#a9adb5",     # Al cathode current collector (silver)
     "cathode_coating": "#7a9a4d",   # LFP cathode
@@ -56,6 +56,8 @@ def _cfg_info(path):
         tabs=[(t.polarity, t.loc_length) for t in cfg.tabs],
     )
     info["Ly_true"] = sum(n * st for n, _, st in info["rolls"]) + info["inter_gap"] * (len(rolls) - 1)
+    w = cfg.assembly.roll_wrap
+    info["wrap"] = (w.thickness, w.coverage) if w is not None else None
     return info
 
 
@@ -112,11 +114,6 @@ def _box3d_internal(info, ax):
         ax.text(cx, 0, z1 + 0.16 * Lz, ("+" if pol == "pos" else "−") + " tab",
                 color=RED, fontsize=11, fontweight="bold", ha="center")
 
-    rolltxt = "   ".join(f"jellyroll {ri+1}: {n} stacks" for ri, (n, _l, _s) in enumerate(info["rolls"]))
-    ax.text2D(0.5, -0.02, rolltxt + f"   ·   inter-roll gap {info['inter_gap']*1e3:.1f} mm"
-              f"   ·   bottom insulator {info['t_ins']*1e3:.2f} mm",
-              transform=ax.transAxes, ha="center", fontsize=9, color="#12325a")
-
     ax.set_xlabel(f"X = length {Lx*1e3:.0f} mm")
     ax.set_ylabel(f"Y = thickness {info['Ly_true']*1e3:.0f} mm  (exaggerated)")
     ax.set_zlabel(f"Z = height {Lz*1e3:.0f} mm")
@@ -124,8 +121,11 @@ def _box3d_internal(info, ax):
     ax.set_box_aspect((Lx, Ly, Lz + z0))
     ax.view_init(elev=20, azim=-58)
     ntot = sum(n for n, _, _ in info["rolls"])
-    ax.set_title(f"3-D cutaway: {ntot} stacks × 5 layers (Cathode-CC|Cathode|Sep|Anode|Anode-CC)",
-                 fontsize=11)
+    rolls_txt = " + ".join(f"{n}" for n, _, _ in info["rolls"])
+    ax.set_title(f"3-D cutaway: {ntot} stacks ({rolls_txt}) × 5 layers "
+                 f"(Cathode-CC|Cathode|Sep|Anode|Anode-CC)\n"
+                 f"inter-roll gap {info['inter_gap']*1e3:.1f} mm   ·   "
+                 f"bottom insulator {info['t_ins']*1e3:.2f} mm", fontsize=10)
 
 
 def _zoom3d(info, ax, n_show=6):
@@ -150,6 +150,32 @@ def _zoom3d(info, ax, n_show=6):
     ax.set_xlabel("length", fontsize=8); ax.set_ylabel("thickness →", fontsize=8)
     ax.set_box_aspect((1.0, max(n_show * 0.9, 1.0), 1.0))
     ax.view_init(elev=16, azim=-62)
+
+
+def _topview(info, ax):
+    """Top view (X-Y, looking down the height Z): the two jellyrolls with the mylar wrap border."""
+    Lx, Ly, gap = info["Lx"], info["Ly_true"], info["inter_gap"]
+    y = 0.0
+    for ri, (n, _l, st) in enumerate(info["rolls"]):
+        rw = n * st
+        ax.add_patch(Rectangle((0, y), Lx, rw, facecolor=BLUE, ec="none", alpha=0.30))
+        if info["wrap"] is not None:
+            # mylar wrap = a border around the roll's side faces (top/bottom height ends open)
+            ax.add_patch(Rectangle((0, y), Lx, rw, facecolor="none", ec=MYLAR, lw=3.0))
+        else:
+            ax.add_patch(Rectangle((0, y), Lx, rw, facecolor="none", ec="k", lw=1.0))
+        ax.text(Lx / 2, y + rw / 2, f"jellyroll {ri+1}", ha="center", va="center",
+                fontsize=8, color="#12325a")
+        y += rw
+        if ri < len(info["rolls"]) - 1:
+            ax.add_patch(Rectangle((0, y), Lx, gap, facecolor=GREY, ec="none", alpha=0.6))
+            y += gap
+    ax.set_xlim(-0.04 * Lx, 1.04 * Lx); ax.set_ylim(-0.10 * Ly, y + 0.10 * Ly)
+    ax.set_aspect(Lx / max(y, 1e-9) * 0.5)
+    wtxt = f"mylar wrap {info['wrap'][0]*1e6:.0f} µm" if info["wrap"] else "no wrap"
+    ax.set_title(f"top view X–Y: {wtxt} on roll sides (purple)", fontsize=9)
+    ax.set_xlabel("X = length"); ax.set_ylabel("Y = thickness")
+    ax.set_xticks([]); ax.set_yticks([])
 
 
 def _sandwich(info, ax):
@@ -178,20 +204,23 @@ def _sandwich(info, ax):
 
 def draw(info, out="outputs/cell_internal_3d.png"):
     fig = plt.figure(figsize=(16, 8.5))
-    axA = fig.add_axes([0.00, 0.04, 0.60, 0.88], projection="3d")     # main 3-D, all stacks
-    axZ = fig.add_axes([0.61, 0.52, 0.24, 0.40], projection="3d")     # 3-D zoom, few stacks
-    axD = fig.add_axes([0.60, 0.30, 0.33, 0.20])                      # sandwich detail (to scale)
+    axA = fig.add_axes([0.00, 0.04, 0.58, 0.88], projection="3d")     # main 3-D, all stacks
+    axZ = fig.add_axes([0.60, 0.55, 0.22, 0.38], projection="3d")     # 3-D zoom, few stacks
+    axD = fig.add_axes([0.60, 0.36, 0.34, 0.15])                      # sandwich detail (to scale)
+    axT = fig.add_axes([0.63, 0.13, 0.28, 0.16])                      # top view (wrap)
     _box3d_internal(info, axA)
     _zoom3d(info, axZ)
     _sandwich(info, axD)
+    _topview(info, axT)
     handles = [Line2D([0], [0], marker="s", color="w", markerfacecolor=ROLE_COL[r],
                       markeredgecolor="k", markersize=12, label=ROLE_LABEL[r]) for r in ROLE_ORDER]
     handles += [Line2D([0], [0], marker="s", color="w", markerfacecolor=GREEN,
                        markeredgecolor="k", markersize=12, label="Bottom insulator"),
                 Line2D([0], [0], marker="s", color="w", markerfacecolor=RED,
-                       markeredgecolor="k", markersize=12, label="Tab")]
-    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.77, 0.02),
-               ncol=4, fontsize=9, frameon=True, title="layers")
+                       markeredgecolor="k", markersize=12, label="Tab"),
+                Line2D([0], [0], color=MYLAR, lw=3, label="Mylar wrap (roll sides)")]
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.50, 0.005),
+               ncol=8, fontsize=8.5, frameon=True, title="layers")
     fig.suptitle("PrismaticCell — 3-D internal stack structure", fontsize=15, fontweight="bold")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.savefig(out, dpi=125, bbox_inches="tight")

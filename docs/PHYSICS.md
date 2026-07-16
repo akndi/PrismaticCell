@@ -238,6 +238,13 @@ Faces may be named **physically** (`top`/`bottom` = +z/-z, `x_min/x_max`, `y_min
   and contact), which throttles heat extraction when that face is cooled, and (ii) its areal heat
   capacity `ρc_ins·t_ins·A` lumped onto that face's cells. Purely a thermal element (the can carries
   no ECM current in this model). Absent when `enclosure.insulator` is unset.
+- **Jellyroll wrap** (`assembly.roll_wrap`): a thin film (e.g. mylar/PET) wrapped around each
+  jellyroll's side faces. Like the insulator it is a sub-grid conductive layer: its `t/k`
+  resistance-area is added on the wrapped **external** cell faces (`coverage`: `sides` = big
+  front/back + small ends, `big_faces`, `ends`, or `all`), with its areal mass on those cells. Only
+  faces bordering the can/ambient carry it; the internal inter-roll faces are neglected (their wrap
+  resistance is negligible next to the air gap). Per-face contributions from the insulator and the
+  wrap **add in series** where they coincide.
 
 Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere; stack↔wall via a
 contact conductance; tab heat-loss path), **convection** (external Newton cooling; internal gaps
