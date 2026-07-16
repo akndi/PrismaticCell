@@ -90,7 +90,13 @@ class ThermalOperator:
             return out
 
         region = np.ascontiguousarray(geom.region)
+        cell_roll = np.ascontiguousarray(geom.cell_roll)
         gc = float(getattr(geom, "contact_conductance", 0.0))
+        # Inter-roll gap (electrolyte) as a sub-grid layer at the internal interface between two
+        # different rolls: series resistance-area + its areal mass split onto the two cells.
+        inter_R = float(getattr(geom, "inter_roll_R_area", 0.0))
+        inter_mass = float(getattr(geom, "inter_roll_rhocp_t", 0.0))
+        M_inter = np.zeros(N)
         # Sub-grid wall shell: the enclosure wall wraps the cavity boundary as a conductive skin.
         wall_t = float(getattr(geom, "wall_thickness", 0.0))
         wall_k = float(getattr(geom, "wall_k", 0.0))
@@ -102,7 +108,7 @@ class ThermalOperator:
         if shell:
             shell_R_area = wall_t / wall_k + (1.0 / gc if gc > 0.0 else 0.0)
 
-        def _add_interior(k, lo_idx, hi_idx, area, dist, reg_lo, reg_hi):
+        def _add_interior(k, lo_idx, hi_idx, area, dist, reg_lo, reg_hi, roll_lo, roll_hi):
             kh = _harmonic(k[0], k[1])
             g = (kh * area / dist).ravel()
             # Series interfacial contact resistance at the can-wall interface (PHYSICS §5):
@@ -117,6 +123,19 @@ class ThermalOperator:
                     g[iface] = 1.0 / (1.0 / np.maximum(gcond, 1e-300) + 1.0 / gcontact)
             p = lo_idx.ravel()
             q = hi_idx.ravel()
+            # Sub-grid inter-roll electrolyte gap: two active cells of different rolls abutting (the
+            # gap band is thinner than a cell). Add inter_R in series and split its mass onto them.
+            if inter_R > 0.0 or inter_mass > 0.0:
+                gapface = (((reg_lo == REGION_ACTIVE) & (reg_hi == REGION_ACTIVE)
+                            & (roll_lo != roll_hi))).ravel()
+                if np.any(gapface):
+                    if inter_R > 0.0:
+                        g = g.copy()
+                        g[gapface] = 1.0 / (1.0 / np.maximum(g[gapface], 1e-300) + inter_R / area)
+                    if inter_mass > 0.0:
+                        half = 0.5 * inter_mass * area
+                        np.add.at(M_inter, p[gapface], half)
+                        np.add.at(M_inter, q[gapface], half)
             rows.append(p); cols.append(p); vals.append(g)
             rows.append(q); cols.append(q); vals.append(g)
             rows.append(p); cols.append(q); vals.append(-g)
@@ -126,15 +145,18 @@ class ThermalOperator:
         if nx > 1:
             _add_interior((kx[:-1, :, :], kx[1:, :, :]),
                           idx[:-1, :, :], idx[1:, :, :], area_x, dx,
-                          region[:-1, :, :], region[1:, :, :])
+                          region[:-1, :, :], region[1:, :, :],
+                          cell_roll[:-1, :, :], cell_roll[1:, :, :])
         if ny > 1:
             _add_interior((ky[:, :-1, :], ky[:, 1:, :]),
                           idx[:, :-1, :], idx[:, 1:, :], area_y, dy,
-                          region[:, :-1, :], region[:, 1:, :])
+                          region[:, :-1, :], region[:, 1:, :],
+                          cell_roll[:, :-1, :], cell_roll[:, 1:, :])
         if nz > 1:
             _add_interior((kz[:, :, :-1], kz[:, :, 1:]),
                           idx[:, :, :-1], idx[:, :, 1:], area_z, dz,
-                          region[:, :, :-1], region[:, :, 1:])
+                          region[:, :, :-1], region[:, :, 1:],
+                          cell_roll[:, :, :-1], cell_roll[:, :, 1:])
 
         # --- External faces / boundary conditions ------------------------------ #
         b_bc = np.zeros(N)
@@ -318,7 +340,7 @@ class ThermalOperator:
         ).tocsr()
 
         V = grid.volume()
-        M = np.ascontiguousarray(geom.rho_cp, dtype=np.float64).ravel() * V + M_wall
+        M = np.ascontiguousarray(geom.rho_cp, dtype=np.float64).ravel() * V + M_wall + M_inter
 
         return cls(A=A, b_bc=b_bc, M=M, V=V,
                    g_amb=g_amb, gt_amb=gt_amb, q_flux_out=q_flux_out)

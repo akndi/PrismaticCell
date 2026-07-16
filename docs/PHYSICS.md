@@ -251,7 +251,11 @@ Faces may be named **physically** (`top`/`bottom` = +z/-z, `x_min/x_max`, `y_min
   roll-to-can clearance (`wall_clearance`) is treated as a sub-grid conduction layer: on each
   external face it contributes `wall_clearance/k_fill` in series (with the fill's areal mass), so
   the fill choice actually changes roll↔can heat transfer — electrolyte (`k≈0.6`) couples ~20×
-  better than air (`k≈0.03`). Resolved gap cells (on a fine mesh) use the same fill material.
+  better than air (`k≈0.03`). Resolved gap cells (on a fine mesh) use the same fill material. The
+  **inter-roll gap** (`assembly.inter_gap`) is likewise a sub-grid layer of `cavity_fill` at the
+  internal interface between two adjacent rolls: `inter_gap/k_fill` in series (plus its mass), so the
+  electrolyte between the rolls impedes cross-roll heat flow. `inter_gap = 0` makes the rolls
+  back-to-back (touching, no layer).
 - **Fixed can + placement** (`enclosure.outer_dims`): by default the cavity is auto-sized to hug
   the roll (uniform `wall_clearance`). Giving a fixed can outer size instead sets the inner cavity =
   `outer_dims − 2·wall_thickness`, meshes only the roll bounding box, and represents the wall,

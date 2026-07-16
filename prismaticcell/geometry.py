@@ -104,6 +104,11 @@ class Geometry:
     # cells. Empty dicts when nothing is configured.
     face_R_area: Dict[str, float] = field(default_factory=dict)   # K*m^2/W per physical face
     face_rhocp_t: Dict[str, float] = field(default_factory=dict)  # J/m^2/K per physical face
+    # Inter-roll gap (assembly.inter_gap) filled with cavity_fill: a sub-grid conduction layer added
+    # at the internal interface between two adjacent rolls (thermal.py), so the electrolyte between
+    # the rolls impedes heat flow. Zero when the rolls touch (inter_gap=0) or there is one roll.
+    inter_roll_R_area: float = 0.0     # K*m^2/W, inter_gap / k_fill
+    inter_roll_rhocp_t: float = 0.0    # J/m^2/K, inter_gap areal heat capacity
 
     @property
     def n_active(self) -> int:
@@ -379,6 +384,13 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         face_R_area[face] = face_R_area.get(face, 0.0) + R_area
         face_rhocp_t[face] = face_rhocp_t.get(face, 0.0) + rhocp_t
 
+    # Inter-roll gap as a sub-grid electrolyte layer between adjacent rolls.
+    inter_roll_R_area = 0.0
+    inter_roll_rhocp_t = 0.0
+    if nr > 1 and gap > 0.0 and gap_mat.k_through > 0.0:
+        inter_roll_R_area = gap / gap_mat.k_through
+        inter_roll_rhocp_t = gap_mat.density * gap_mat.cp * gap
+
     ins_cfg = cfg.enclosure.insulator
     ins_face = ""
     ins_R_area = 0.0
@@ -454,6 +466,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         stack_axis=sa, len_axis=la, hgt_axis=ha,
         insulator_face=ins_face, insulator_R_area=ins_R_area, insulator_rhocp_t=ins_rhocp_t,
         face_R_area=face_R_area, face_rhocp_t=face_rhocp_t,
+        inter_roll_R_area=inter_roll_R_area, inter_roll_rhocp_t=inter_roll_rhocp_t,
     )
 
 

@@ -311,6 +311,33 @@ def test_explicit_can_too_small_raises():
         build_geometry(cfg)
 
 
+def test_inter_roll_gap_is_electrolyte_layer():
+    """The inter-roll gap is a sub-grid electrolyte layer: R = inter_gap / k_fill; 0 if touching."""
+    cfg = _cfg("y", width=0.20, height=0.12)
+    cfg.assembly.cavity_fill = "electrolyte"
+    cfg.assembly.inter_gap = 1e-3
+    g = build_geometry(cfg)
+    assert np.isclose(g.inter_roll_R_area, 1e-3 / 0.60)
+    assert np.isclose(g.inter_roll_rhocp_t, 1200 * 2000 * 1e-3)
+    cfg.assembly.inter_gap = 0.0                       # back-to-back
+    assert build_geometry(cfg).inter_roll_R_area == 0.0
+
+
+def test_inter_roll_gap_decouples_rolls():
+    """With one big face cooled, an electrolyte inter-roll gap makes the far roll run hotter than
+    a back-to-back (touching) pair -- the gap impedes heat crossing between the rolls."""
+    def mk(gap):
+        cool = Cooling(y_min=FaceBC("convection", h=200.0, t_inf=298.15))
+        cfg = _cfg("y", width=0.20, height=0.12, cooling=cool)
+        cfg.assembly.cavity_fill = "electrolyte"
+        cfg.assembly.inter_gap = gap
+        cfg.solver.mode = "steady"
+        return cfg
+    r_touch = coupling.run(mk(0.0))
+    r_gap = coupling.run(mk(3e-3))
+    assert r_gap.T_max[-1] > r_touch.T_max[-1] + 1e-4
+
+
 def test_cavity_fill_unknown_material_rejected():
     cfg = _cfg("y", width=0.20, height=0.12)
     cfg.assembly.cavity_fill = "nonexistent_fluid"
