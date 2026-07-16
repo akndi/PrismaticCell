@@ -103,6 +103,54 @@ def test_stack_axis_rotational_invariance():
     assert np.isclose(rz.T_mean[-1], ry.T_mean[-1], atol=1e-4)
 
 
+_AXI = {"x": 0, "y": 1, "z": 2}
+_FACES = {0: ("x_min", "x_max"), 1: ("y_min", "y_max"), 2: ("top", "bottom")}
+
+
+def _rotated_cfg(stack_axis):
+    """Same physical cell, rotated so the stack axis is x/y/z, with DISTINCT length/height/stack
+    extents, per-role mesh counts, and asymmetric per-role cooling -- so the la/ha distinction is
+    actually exercised (a symmetric cube would pass even with la/ha transposed)."""
+    sa = _AXI[stack_axis]
+    la, ha = [a for a in (0, 1, 2) if a != sa]
+    stack = Stack(_layers(), width=0.16, height=0.10)     # length=0.16, height=0.10 (distinct)
+    # ~40 sandwiches/roll -> ~16 mm stack extent, resolvable by the nS=4 stack mesh below
+    asm = Assembly([Jellyroll(stack, 40), Jellyroll(stack, 40)],
+                   stack_axis=stack_axis, arrangement="stacked", inter_gap=5e-4, wall_clearance=2e-4)
+    ecm = ECM(50.0, os.path.join(DATA, "lfp_ocv.csv"), os.path.join(DATA, "lfp_entropy.csv"),
+              os.path.join(DATA, "lfp_r0.csv"), 20000.0,
+              rc_pairs=[RCPair(os.path.join(DATA, "lfp_rc1_r.csv"),
+                               os.path.join(DATA, "lfp_rc1_c.csv"), 22000.0, 0.0)])
+    tabs = [Tab("pos", loc_length=0.2, loc_height=0.9, size_length=0.02, size_height=0.01),
+            Tab("neg", loc_length=0.8, loc_height=0.9, size_length=0.02, size_height=0.01)]
+    enc = Enclosure("prismatic", "can_al", 0.8e-3, 150.0)
+    dims = [0, 0, 0]; dims[la], dims[ha], dims[sa] = 8, 5, 4        # per-role mesh counts
+    cool = Cooling()
+    for ax, h in ((la, 12.0), (ha, 27.0), (sa, 40.0)):            # per-role cooling
+        for f in _FACES[ax]:
+            setattr(cool, f, FaceBC("convection", h=h, t_inf=298.15))
+    cfg = SimConfig("rot", _mats(), asm, tabs, enc, ecm, Mesh(*dims), cool,
+                    Load("constant_current", 20.0), Solver(dt=30.0, t_end=300.0))
+    cfg.data_root = "."
+    return cfg
+
+
+@pytest.mark.parametrize("cm", ["planar", "layered"])
+def test_stack_axis_rotational_invariance_adversarial(cm):
+    """A non-symmetric cell (distinct extents, per-axis mesh, asymmetric cooling) gives IDENTICAL
+    results whichever physical axis is the stack axis -- proving geometry/distributed/thermal all
+    share one consistent axis convention (would fail if len_axis/hgt_axis were transposed)."""
+    res = {}
+    for ax in ("x", "y", "z"):
+        cfg = _rotated_cfg(ax)
+        cfg.solver.collector_model = cm
+        res[ax] = coupling.run(cfg)
+    for ax in ("x", "y"):
+        assert np.isclose(res[ax].v_terminal[-1], res["z"].v_terminal[-1], atol=1e-7)
+        assert np.isclose(res[ax].T_max[-1], res["z"].T_max[-1], atol=1e-5)
+        assert np.isclose(res[ax].T_mean[-1], res["z"].T_mean[-1], atol=1e-5)
+
+
 def test_tab_thickness_defaults_to_collector():
     """A tab with thickness=None uses that polarity's collector thickness (Al 13um / Cu 6um)."""
     cfg = _cfg("y", width=0.20, height=0.12)

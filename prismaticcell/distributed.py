@@ -191,7 +191,7 @@ def solve_network(
     if n_pos_nodes == 0 or n_neg_nodes == 0:
         raise ValueError(
             "Network is not terminated: need at least one positive and one negative tab "
-            f"node (got {n_pos_nodes} pos, {n_neg_nodes} neg). Check tab edges/positions."
+            f"node (got {n_pos_nodes} pos, {n_neg_nodes} neg). Check tab loc/size footprints."
         )
 
     if collector_model == "layered":

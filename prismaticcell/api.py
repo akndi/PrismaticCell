@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import itertools
+from dataclasses import is_dataclass, fields as dc_fields
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from .config import SimConfig
@@ -37,12 +38,19 @@ def _descend(obj: Any, key: str) -> Any:
 
 
 def _assign(obj: Any, key: str, value: Any) -> None:
-    """Assign ``value`` onto ``obj`` at the final path segment ``key``."""
+    """Assign ``value`` onto ``obj`` at the final path segment ``key``.
+
+    For dataclass targets an unknown field raises (rather than silently attaching an ignored
+    attribute) so a mistyped sweep/override path fails loudly instead of being a silent no-op.
+    """
     if isinstance(obj, list):
         obj[int(key)] = value
     elif isinstance(obj, dict):
         obj[key] = value
     else:
+        if is_dataclass(obj) and key not in {f.name for f in dc_fields(obj)}:
+            raise AttributeError(
+                f"{type(obj).__name__} has no field '{key}' (dotted-path typo?)")
         setattr(obj, key, value)
 
 

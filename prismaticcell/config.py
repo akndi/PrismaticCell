@@ -65,23 +65,25 @@ class Layer:
 class Stack:
     """One electrode sandwich (repeat unit): CathodeCC | Cathode | Sep | Anode | AnodeCC.
 
-    ``width`` x ``height`` is the in-plane electrode footprint of the sandwich.
+    ``width`` x ``height`` is the in-plane electrode footprint of the sandwich: ``width`` maps to
+    the electrode LENGTH axis and ``height`` to the electrode HEIGHT axis (the two axes that are
+    not ``assembly.stack_axis``).
     """
     layers: List[Layer]         # ordered layers of ONE sandwich
-    width: float                # m, in-plane x extent (electrode)
-    height: float               # m, in-plane y extent (electrode)
+    width: float                # m, electrode LENGTH extent (first in-plane axis)
+    height: float               # m, electrode HEIGHT extent (second in-plane axis)
 
 
 @dataclass
 class Jellyroll:
-    """A jellyroll = ``n_stacks`` electrode sandwiches through the thickness (z).
+    """A jellyroll = ``n_stacks`` electrode sandwiches stacked along ``assembly.stack_axis``.
 
     ``origin`` is the lower corner of the roll's bounding box inside the can cavity
     (m, [x,y,z]); if ``None`` the geometry builder auto-arranges the rolls per
-    ``Assembly.arrangement``. Both rolls are wired in parallel to the cell tabs.
+    ``Assembly.arrangement``. All rolls are wired in parallel to the cell tabs.
     """
     stack: Stack                # the repeated sandwich
-    n_stacks: int               # number of sandwiches stacked through z
+    n_stacks: int               # number of sandwiches stacked along the through-plane axis
     origin: Optional[List[float]] = None
 
 
@@ -113,7 +115,9 @@ class Tab:
     (e.g. Al 13 µm / Cu 6 µm) and ``material`` to its collector material — i.e. "a tab the size of
     the current-collector thickness". All ``n_stacks`` collector foils (both jellyrolls) bus to it
     in parallel. ``protrusion`` is the out-of-cell tab length used for the series R_tab and the
-    tab heat-loss path.
+    tab heat-loss path; the current-carrying width is taken as ``size_length`` (so
+    R_tab = protrusion / (sigma * n_foils * size_length * thickness)), while ``size_height`` only
+    positions the footprint.
     """
     polarity: Literal["pos", "neg"]
     loc_length: float = 0.5     # fractional center along the electrode length axis (0..1)
@@ -183,10 +187,12 @@ class ECM:
 # --------------------------------------------------------------------------- #
 @dataclass
 class Mesh:
-    """Structured grid resolution. ``nx``,``ny`` also set the ECM network size."""
-    nx: int                     # in-plane x cells (electrode + tab columns)
-    ny: int                     # in-plane y cells
-    nz: int                     # through-plane thermal cells (stack layering)
+    """Structured grid resolution along the physical x/y/z axes. The two axes that are not
+    ``assembly.stack_axis`` set the in-plane ECM-network resolution; the stack axis resolves the
+    through-thickness stack layering."""
+    nx: int                     # cells along physical x
+    ny: int                     # cells along physical y
+    nz: int                     # cells along physical z
 
 
 FaceName = Literal["top", "bottom", "x_min", "x_max", "y_min", "y_max"]
@@ -196,7 +202,9 @@ FaceName = Literal["top", "bottom", "x_min", "x_max", "y_min", "y_max"]
 class FaceBC:
     """Boundary condition on one external face of the cell.
 
-    ``top``/``bottom`` are the +z/-z (large) faces; the four sides are x/y min/max.
+    Face names are physical: ``top``/``bottom`` are the +z/-z faces; the four sides are x/y
+    min/max. Which of these are the large flat faces depends on ``assembly.stack_axis`` (e.g. for
+    ``stack_axis='y'`` the large faces are ``y_min``/``y_max``).
     """
     kind: Literal["convection", "dirichlet", "neumann", "adiabatic"]
     h: float = 0.0              # W/m^2/K, convective coefficient (convection)

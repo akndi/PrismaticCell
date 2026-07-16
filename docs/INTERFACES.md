@@ -63,8 +63,10 @@ wall). Uniform grid. Tag each cell by center location: can-wall shell → REGION
 roll bbox → REGION_ACTIVE with `materials.homogenize(sandwich_layers)` mapped so **k_z = through-
 plane, k_x=k_y = in-plane**. `cap_cv` normalized so it sums exactly to `cfg.ecm.capacity_Ah`.
 Foil sheet conductance uses the collector layer's `sigma_elec` × its thickness × `n_stacks`. Tab
-nodes = the `y_max`(or configured edge) columns spanning `tab.width` at fractional `tab.position`,
-for every roll (both rolls parallel to the same terminal).
+nodes = the electrode columns under each tab's rectangular footprint (fractional `loc_length`,
+`loc_height` center; `size_length` × `size_height` extents), for every roll (both rolls parallel
+to the same terminal). Anisotropy and the electrode plane follow `assembly.stack_axis` (the
+through-plane axis); the two in-plane axes are the electrode length and height.
 
 ---
 

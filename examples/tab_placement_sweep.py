@@ -1,6 +1,6 @@
 """Design study: how tab placement affects hotspot temperature and current uniformity.
 
-Sweeps the positive and negative tab positions along their edge and records, for each layout,
+Sweeps the positive and negative tab locations along the electrode length and records, per layout,
 the peak temperature, the in-plane temperature spread, and the current-density non-uniformity.
 Demonstrates the intended use of the tool for tab-placement design.
 
@@ -41,21 +41,21 @@ def main():
     base.solver.t_end = 1800.0
     base.load.value = 2.0   # 2C to accentuate ohmic/tab effects
 
-    # sweep the two tab positions along their (y_max) edge
+    # sweep the two tabs' fractional location along the electrode length
     grid = {
-        "tabs.0.position": [0.15, 0.5, 0.85],
-        "tabs.1.position": [0.15, 0.5, 0.85],
+        "tabs.0.loc_length": [0.15, 0.5, 0.85],
+        "tabs.1.loc_length": [0.15, 0.5, 0.85],
     }
     print("Running tab-placement sweep (9 layouts) ...")
     rows = Sweep(base, grid).run(reducer=uniformity_reducer)
     for r in rows:
-        print(f"  pos+={r['tabs.0.position']:.2f} pos-={r['tabs.1.position']:.2f} "
+        print(f"  pos+={r['tabs.0.loc_length']:.2f} pos-={r['tabs.1.loc_length']:.2f} "
               f"-> Tmax={r['T_max_C']:.2f}C dT={r['dT_K']:.2f}K "
               f"j_spread={r['j_spread_pct']:.1f}%")
 
-    viz.plot_sweep_heatmap(rows, x="tabs.0.position", y="tabs.1.position", z="T_max_C",
+    viz.plot_sweep_heatmap(rows, x="tabs.0.loc_length", y="tabs.1.loc_length", z="T_max_C",
                            path=os.path.join(args.out, "tab_sweep_Tmax.png"))
-    viz.plot_sweep_heatmap(rows, x="tabs.0.position", y="tabs.1.position", z="j_spread_pct",
+    viz.plot_sweep_heatmap(rows, x="tabs.0.loc_length", y="tabs.1.loc_length", z="j_spread_pct",
                            path=os.path.join(args.out, "tab_sweep_jspread.png"))
     print(f"Sweep heatmaps written to {args.out}/")
 
