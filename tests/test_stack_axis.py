@@ -311,6 +311,34 @@ def test_explicit_can_too_small_raises():
         build_geometry(cfg)
 
 
+def test_tab_thermal_fin_profile():
+    """The 1-D tab fin profile matches its closed form, the bump is non-negative, the zero-current
+    limit is linear, and a non-heat-sunk tab returns no profile."""
+    from prismaticcell import viz
+    cool = Cooling(y_min=FaceBC("convection", h=100.0, t_inf=298.15),
+                   y_max=FaceBC("convection", h=100.0, t_inf=298.15))
+    cfg = _cfg("y", width=0.20, height=0.12, cooling=cool)
+    cfg.solver.mode = "steady"
+    cfg.load = Load("constant_current", 60.0)
+    r = coupling.run(cfg)
+    prof = viz.tab_thermal_profiles(r, cool)
+    for pol, gcond in (("pos", r.geom.tab_heat_cond_pos), ("neg", r.geom.tab_heat_cond_neg)):
+        p = prof[pol]
+        xi = p["xi"]
+        # closed form: T = T_root + (T_sink-T_root) xi + P/(2G) xi(1-xi)
+        expect = p["T_root"] + (p["T_sink"] - p["T_root"]) * xi + p["P"] / (2 * gcond) * xi * (1 - xi)
+        assert np.allclose(p["T"], expect, rtol=1e-9, atol=1e-9)
+        assert p["P"] > 0.0 and np.isclose(p["R_tab"], 1.0 / (r.geom.g_tab_pos if pol == "pos"
+                                                              else r.geom.g_tab_neg))
+        lin = p["T_root"] + (p["T_sink"] - p["T_root"]) * xi          # self-heating bump >= 0
+        assert np.all(p["T"] >= lin - 1e-9)
+
+    # non-heat-sunk tab -> no fin profile (only the root is meaningful)
+    cfg.enclosure.tab_heat_sink = False
+    p2 = viz.tab_thermal_profiles(coupling.run(cfg), cool)["pos"]
+    assert p2["T"] is None and np.isfinite(p2["T_root"])
+
+
 def test_inter_roll_gap_is_electrolyte_layer():
     """The inter-roll gap is a sub-grid electrolyte layer: R = inter_gap / k_fill; 0 if touching."""
     cfg = _cfg("y", width=0.20, height=0.12)

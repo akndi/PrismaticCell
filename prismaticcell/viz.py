@@ -256,6 +256,106 @@ def plot_current_distribution(result, path: Optional[str] = None):
 
 
 # --------------------------------------------------------------------------- #
+# tab (1-D fin) temperature
+# --------------------------------------------------------------------------- #
+def _tab_sink_temp(cooling, geom, tfield) -> float:
+    """Terminal/busbar sink temperature the tab far-end is heat-sunk to.
+
+    Matches the thermal solver: the mean ``t_inf`` of the non-adiabatic faces. If ``cooling`` is
+    not supplied, fall back to the coldest active cell (a reasonable coolant-side proxy).
+    """
+    if cooling is not None:
+        faces = (cooling.top, cooling.bottom, cooling.x_min, cooling.x_max,
+                 cooling.y_min, cooling.y_max)
+        tinfs = [f.t_inf for f in faces if f.kind in ("convection", "dirichlet")]
+        if tinfs:
+            return float(np.mean(tinfs))
+    mask = np.asarray(geom.active_mask, dtype=bool)
+    return float(np.nanmin(np.where(mask, tfield, np.nan)))
+
+
+def _tab_root_temp(geom, tfield, attr) -> float:
+    """Mean solved temperature of the control volumes a tab is welded to (its root)."""
+    vals = []
+    for roll in geom.rolls:
+        for (a, b) in getattr(roll, attr, []):
+            for s in roll.col_zcells.get((a, b), []):
+                i, j, k = geom.phys_index(a, b, s)
+                vals.append(float(tfield[i, j, k]))
+    return float(np.mean(vals)) if vals else float("nan")
+
+
+def tab_thermal_profiles(result, cooling=None, n: int = 25) -> dict:
+    """1-D fin temperature profile along each tab, derived from the solved field.
+
+    The tab is a lumped conductor in the model (not a control volume). Its steady axial profile
+    with uniform ohmic self-heating is fully set by the model's own lumped quantities:
+
+        T(xi) = T_root + (T_sink - T_root) * xi  +  P / (2 G) * xi (1 - xi),   xi = x/L in [0, 1]
+
+    where ``P = I^2 / g_tab`` is the tab ohmic dissipation, ``G = tab_heat_cond`` [W/K] is the tab's
+    conduction-to-sink, ``T_root`` is the mean temperature of the attachment CVs (from the solved
+    field) and ``T_sink`` the heat-sunk terminal temperature. Returns per polarity a dict with
+    ``xi``, ``T`` [K], ``T_root``, ``T_sink``, ``T_peak`` [K], ``P`` [W] and ``R_tab`` [Ohm].
+    ``T`` is None when the tab is not heat-sunk (``tab_heat_cond = 0``): with no sink the steady
+    profile is undefined, so only ``T_root`` is meaningful.
+    """
+    geom = result.geom
+    tfield = _final_T_field(result)
+    i_term = float(np.asarray(result.i_terminal, dtype=float).ravel()[-1])
+    t_sink = _tab_sink_temp(cooling, geom, tfield)
+    xi = np.linspace(0.0, 1.0, int(max(n, 2)))
+    out = {}
+    for pol, gtab, gcond, nodes_attr in (
+        ("pos", float(getattr(geom, "g_tab_pos", 0.0)), float(getattr(geom, "tab_heat_cond_pos", 0.0)), "tab_pos_nodes"),
+        ("neg", float(getattr(geom, "g_tab_neg", 0.0)), float(getattr(geom, "tab_heat_cond_neg", 0.0)), "tab_neg_nodes"),
+    ):
+        t_root = _tab_root_temp(geom, tfield, nodes_attr)
+        r_tab = 1.0 / gtab if gtab > 0.0 else float("inf")
+        p_tab = i_term * i_term * r_tab if gtab > 0.0 else 0.0
+        if gcond > 0.0 and np.isfinite(p_tab):
+            T = t_root + (t_sink - t_root) * xi + (p_tab / (2.0 * gcond)) * xi * (1.0 - xi)
+            t_peak = float(np.max(T))
+        else:
+            T = None
+            t_peak = t_root
+        out[pol] = dict(xi=xi, T=T, T_root=t_root, T_sink=t_sink, T_peak=t_peak,
+                        P=p_tab, R_tab=r_tab)
+    return out
+
+
+def plot_tab_temperature(result, cooling=None, path: Optional[str] = None):
+    """Plot the 1-D temperature profile along each tab (root -> heat-sunk tip), including tab
+    ohmic self-heating. Shows T_root (solved), the peak, and the terminal sink temperature.
+    """
+    prof = tab_thermal_profiles(result, cooling=cooling)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    colors = {"pos": "#c0392b", "neg": "#2c3e50"}
+    labels = {"pos": "+ tab", "neg": "− tab"}
+    for pol, p in prof.items():
+        c = colors[pol]
+        if p["T"] is None:
+            ax.axhline(_k_to_c(p["T_root"]), color=c, ls=":",
+                       label=f"{labels[pol]} root {_k_to_c(p['T_root']):.2f} °C (not heat-sunk)")
+            continue
+        ax.plot(p["xi"], _k_to_c(p["T"]), color=c, lw=2,
+                label=f"{labels[pol]}: root {_k_to_c(p['T_root']):.2f} → peak "
+                      f"{_k_to_c(p['T_peak']):.2f} °C, I²R={p['P']:.2g} W")
+        ipk = int(np.argmax(p["T"]))
+        ax.plot(p["xi"][ipk], _k_to_c(p["T"][ipk]), marker="o", color=c, ms=7)
+    t_sink = next(iter(prof.values()))["T_sink"]
+    ax.axhline(_k_to_c(t_sink), color="gray", ls="--", lw=1,
+               label=f"terminal sink {_k_to_c(t_sink):.2f} °C")
+    ax.set_xlabel("position along tab  (0 = root / weld,  1 = heat-sunk tip)")
+    ax.set_ylabel("Temperature [°C]")
+    ax.set_title("Tab temperature (1-D fin with I²R self-heating)")
+    ax.legend(loc="best", fontsize=8)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return _save(fig, path)
+
+
+# --------------------------------------------------------------------------- #
 # sweep heatmap
 # --------------------------------------------------------------------------- #
 def plot_sweep_heatmap(rows: Sequence[dict], x: str, y: str, z: str,

@@ -209,6 +209,8 @@ def plot_time_series(result: Result, path=None): ...       # V, I, SOC, Tmax/Tme
 def plot_temperature_slice(result, k_index=None, path=None): ...  # in-plane T map + hotspot
 def plot_current_distribution(result, path=None): ...      # j_area map (tab effect)
 def plot_sweep_heatmap(rows, x, y, z, path=None): ...       # design-sweep heatmap
+def tab_thermal_profiles(result, cooling=None, n=25): ...   # 1-D tab fin T(x): root->sink + I²R
+def plot_tab_temperature(result, cooling=None, path=None): ...  # plot the tab fin profiles
 
 # cli.py
 def main(argv=None) -> int: ...    # `prismaticcell run CONFIG [--steady] [--out DIR]`
