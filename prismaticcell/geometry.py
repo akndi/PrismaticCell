@@ -135,6 +135,22 @@ def _role_layer(layers, role):
     raise ValueError(f"sandwich missing layer role '{role}'")
 
 
+def tab_attachment_cells(geom: "Geometry", polarity: str) -> List[Tuple[int, int, int]]:
+    """Physical (i,j,k) control volumes a tab polarity is welded to (its root).
+
+    The tab footprint's electrode columns, expanded over each roll's active stack cells — the
+    single source of truth shared by the thermal tab heat path, the tab Joule backflow
+    (coupling), and the tab-temperature visualization.
+    """
+    attr = "tab_pos_nodes" if polarity == "pos" else "tab_neg_nodes"
+    cells: List[Tuple[int, int, int]] = []
+    for roll in geom.rolls:
+        for (a, b) in getattr(roll, attr, []):
+            for s in roll.col_zcells.get((a, b), []):
+                cells.append(geom.phys_index(a, b, s))
+    return cells
+
+
 def build_geometry(cfg: SimConfig) -> Geometry:
     """Construct the full :class:`Geometry` from a validated ``SimConfig``."""
     wall_real = cfg.enclosure.wall_thickness

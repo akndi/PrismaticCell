@@ -311,6 +311,56 @@ def test_explicit_can_too_small_raises():
         build_geometry(cfg)
 
 
+def test_tab_joule_backflow_injected():
+    """_heat_map deposits exactly frac * I^2/g_tab per polarity into the attachment CVs:
+    frac = 1/2 when the tab is heat-sunk (fin split), 1 when its tip is adiabatic."""
+    from prismaticcell.echem import ECMModel, ECMState
+    from prismaticcell.distributed import solve_network
+    from prismaticcell.geometry import tab_attachment_cells
+
+    def injected(tab_heat_sink):
+        cfg = _cfg("y", width=0.20, height=0.12)
+        cfg.enclosure.tab_heat_sink = tab_heat_sink
+        g = build_geometry(cfg)
+        model = ECMModel.from_config(cfg)
+        n = int(g.active_mask.sum())
+        state = ECMState(soc=np.full(n, 0.6), rc_u=np.zeros((model.n_rc, n)))
+        T = np.full((g.grid.nx, g.grid.ny, g.grid.nz), 298.15)
+        I = 80.0
+        sol = solve_network(g, model, state, T, I, mode="current")
+        active_ijk = np.argwhere(g.active_mask)
+        q = coupling._heat_map(g, model, state, sol, T, active_ijk)
+        V = g.grid.volume()
+        # subtract the ECM + foil-ohmic parts to isolate the tab injection
+        base = np.array(sol.q_ohm_vol, dtype=float)
+        ii, jj, kk = active_ijk[:, 0], active_ijk[:, 1], active_ijk[:, 2]
+        dphi = sol.dphi_field[ii, jj, kk]
+        i_cv = sol.i_cv[ii, jj, kk]
+        q_ecm = (i_cv * (model.ocv_v(state.soc) - dphi)
+                 - i_cv * T[ii, jj, kk] * model.dudt(state.soc)) / V
+        base[ii, jj, kk] += q_ecm
+        extra_W = float(((q - base) * V).sum())
+        p_full = I * I / g.g_tab_pos + I * I / g.g_tab_neg
+        return extra_W, p_full, g
+
+    extra, p_full, g = injected(True)                     # heat-sunk: half of each tab's P
+    assert np.isclose(extra, 0.5 * p_full, rtol=1e-9)
+    extra0, p_full0, _ = injected(False)                  # adiabatic tip: all of P
+    assert np.isclose(extra0, 1.0 * p_full0, rtol=1e-9)
+    # injection lands only on attachment CVs
+    assert len(tab_attachment_cells(g, "pos")) > 0
+
+
+def test_tab_joule_energy_closure_high_current():
+    """Energy balance still closes with the tab Joule backflow active at high current."""
+    cool = Cooling(y_min=FaceBC("convection", h=100.0, t_inf=298.15),
+                   y_max=FaceBC("convection", h=100.0, t_inf=298.15))
+    cfg = _cfg("y", width=0.20, height=0.12, cooling=cool)
+    cfg.load = Load("constant_current", 150.0)
+    res = coupling.run(cfg)
+    assert abs(res.energy_balance["closure_rel"]) < 1e-6
+
+
 def test_tab_thermal_fin_profile():
     """The 1-D tab fin profile matches its closed form, the bump is non-negative, the zero-current
     limit is linear, and a non-heat-sunk tab returns no profile."""

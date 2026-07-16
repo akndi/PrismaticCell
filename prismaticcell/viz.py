@@ -274,14 +274,14 @@ def _tab_sink_temp(cooling, geom, tfield) -> float:
     return float(np.nanmin(np.where(mask, tfield, np.nan)))
 
 
-def _tab_root_temp(geom, tfield, attr) -> float:
-    """Mean solved temperature of the control volumes a tab is welded to (its root)."""
-    vals = []
-    for roll in geom.rolls:
-        for (a, b) in getattr(roll, attr, []):
-            for s in roll.col_zcells.get((a, b), []):
-                i, j, k = geom.phys_index(a, b, s)
-                vals.append(float(tfield[i, j, k]))
+def _tab_root_temp(geom, tfield, polarity) -> float:
+    """Mean solved temperature of the control volumes a tab is welded to (its root).
+
+    With two-way tab coupling the solved field already includes the tab's Joule backflow
+    (half of I^2*R_tab injected at these cells), so no extra correction is applied here.
+    """
+    from .geometry import tab_attachment_cells
+    vals = [float(tfield[i, j, k]) for (i, j, k) in tab_attachment_cells(geom, polarity)]
     return float(np.mean(vals)) if vals else float("nan")
 
 
@@ -306,11 +306,11 @@ def tab_thermal_profiles(result, cooling=None, n: int = 25) -> dict:
     t_sink = _tab_sink_temp(cooling, geom, tfield)
     xi = np.linspace(0.0, 1.0, int(max(n, 2)))
     out = {}
-    for pol, gtab, gcond, nodes_attr in (
-        ("pos", float(getattr(geom, "g_tab_pos", 0.0)), float(getattr(geom, "tab_heat_cond_pos", 0.0)), "tab_pos_nodes"),
-        ("neg", float(getattr(geom, "g_tab_neg", 0.0)), float(getattr(geom, "tab_heat_cond_neg", 0.0)), "tab_neg_nodes"),
+    for pol, gtab, gcond in (
+        ("pos", float(getattr(geom, "g_tab_pos", 0.0)), float(getattr(geom, "tab_heat_cond_pos", 0.0))),
+        ("neg", float(getattr(geom, "g_tab_neg", 0.0)), float(getattr(geom, "tab_heat_cond_neg", 0.0))),
     ):
-        t_root = _tab_root_temp(geom, tfield, nodes_attr)
+        t_root = _tab_root_temp(geom, tfield, pol)
         r_tab = 1.0 / gtab if gtab > 0.0 else float("inf")
         p_tab = i_term * i_term * r_tab if gtab > 0.0 else 0.0
         if gcond > 0.0 and np.isfinite(p_tab):

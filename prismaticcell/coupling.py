@@ -14,7 +14,7 @@ from typing import Dict, Tuple, List, Optional
 import numpy as np
 
 from .config import SimConfig
-from .geometry import build_geometry, Geometry
+from .geometry import build_geometry, Geometry, tab_attachment_cells
 from .echem import ECMModel, ECMState
 from .thermal import ThermalOperator, solve_steady, step_transient, boundary_heat_removed
 from .distributed import solve_network
@@ -103,6 +103,30 @@ def _heat_map(geom: Geometry, model: ECMModel, state: ECMState, sol,
     q_rev = -i_cv * T_act * model.dudt(soc)
     q_ecm = (q_irrev + q_rev) / V
     q_vol[ii, jj, kk] += q_ecm
+
+    # Tab Joule backflow (PHYSICS §4): the tab's own I^2*R_tab is generated in the tab metal,
+    # outside the mesh. Modelled as a 1-D fin with uniform generation: HALF of P returns through
+    # the root into the attachment CVs (the other half exits directly to the heat-sunk terminal
+    # and never enters the cell); with no heat sink (adiabatic tip, tab_heat_cond = 0) ALL of P
+    # must return through the root. Two-way coupling: this heat raises the near-tab temperature,
+    # which feeds back into the local ECM parameters on the next sub-iteration.
+    i_term = float(getattr(sol, "i_terminal", 0.0) or 0.0)
+    if i_term != 0.0:
+        for pol, g_tab, g_sink in (
+                ("pos", float(getattr(geom, "g_tab_pos", 0.0)),
+                 float(getattr(geom, "tab_heat_cond_pos", 0.0))),
+                ("neg", float(getattr(geom, "g_tab_neg", 0.0)),
+                 float(getattr(geom, "tab_heat_cond_neg", 0.0)))):
+            if g_tab <= 0.0:
+                continue
+            p_tab = i_term * i_term / g_tab             # full tab ohmic dissipation [W]
+            frac = 0.5 if g_sink > 0.0 else 1.0         # fin split: half to root, half to sink
+            cells = tab_attachment_cells(geom, pol)
+            if not cells:
+                continue
+            q_each = frac * p_tab / (len(cells) * V)    # volumetric share per attachment CV
+            for (ci, cj, ck) in cells:
+                q_vol[ci, cj, ck] += q_each
     return q_vol
 
 
