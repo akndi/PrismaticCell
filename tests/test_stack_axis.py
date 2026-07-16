@@ -24,6 +24,7 @@ def _mats():
         "separator": Material("separator", 1200, 1900, 0.30, 0.30, 0.0),
         "can_al": Material("can_al", 2700, 900, 238, 238, 0.0),
         "gap_air": Material("gap_air", 1.2, 1005, 0.03, 0.03, 0.0),
+        "pp_insulator": Material("pp_insulator", 905, 1900, 0.20, 0.20, 0.0),
     }
 
 
@@ -176,6 +177,51 @@ def test_face_role_map_matches_orientation():
     assert my["side_face_3"] == "x_min" and my["side_face_4"] == "x_max"
     mz = face_role_map("z")            # default: big faces normal to Z = top/bottom
     assert {mz["front_face"], mz["back_face"]} == {"top", "bottom"}
+
+
+def test_insulator_geometry_face_and_params():
+    """A bottom insulator becomes a sub-grid layer on the -height face with R_area = t/k."""
+    from prismaticcell.config import Insulator
+    cfg = _cfg("y", width=0.20, height=0.12)
+    cfg.enclosure.insulator = Insulator("pp_insulator", thickness=5e-4, location="bottom")
+    g = build_geometry(cfg)
+    # stack_axis='y' -> height = Z, so the -height end is the physical "bottom" face
+    assert g.insulator_face == "bottom"
+    assert np.isclose(g.insulator_R_area, 5e-4 / 0.20)          # t / k_through
+    assert np.isclose(g.insulator_rhocp_t, 905 * 1900 * 5e-4)   # rho*cp*t
+    # location='top' moves it to the +height face
+    cfg.enclosure.insulator = Insulator("pp_insulator", thickness=5e-4, location="top")
+    assert build_geometry(cfg).insulator_face == "top"
+
+
+def test_insulator_throttles_bottom_cooling():
+    """With only the bottom face cooled, a bottom insulator raises the steady temperature by
+    adding series resistance on that (the only) heat-exit path -- the feedback the slab exists for."""
+    from prismaticcell.config import Insulator
+
+    def mk(with_ins):
+        cool = Cooling(bottom=FaceBC("convection", h=200.0, t_inf=298.15))
+        cfg = _cfg("y", width=0.20, height=0.12, cooling=cool)
+        cfg.solver.mode = "steady"      # isolate the resistance effect (mass irrelevant at steady)
+        if with_ins:
+            cfg.enclosure.insulator = Insulator("pp_insulator", thickness=2e-3, location="bottom")
+        return cfg
+
+    r_no = coupling.run(mk(False))
+    r_ins = coupling.run(mk(True))
+    assert r_ins.T_max[-1] > r_no.T_max[-1] + 1e-3      # insulator -> less heat out -> hotter
+
+
+def test_insulator_unknown_material_rejected():
+    """enclosure.insulator with an unknown material / non-positive thickness fails validation."""
+    from prismaticcell.config import Insulator
+    cfg = _cfg("y", width=0.20, height=0.12)
+    cfg.enclosure.insulator = Insulator("does_not_exist", thickness=5e-4)
+    with pytest.raises(ValueError):
+        cfg.validate()
+    cfg.enclosure.insulator = Insulator("pp_insulator", thickness=-1.0)
+    with pytest.raises(ValueError):
+        cfg.validate()
 
 
 def test_role_based_cooling_from_yaml():

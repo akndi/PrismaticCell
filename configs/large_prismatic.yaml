@@ -51,6 +51,10 @@ enclosure:
   contact_conductance: 150.0
   wall_model: shell
   tab_heat_sink: true
+  insulator:                 # bottom-insulation film: full-footprint slab on the can floor
+    material: pp_insulator   # polypropylene (k ~ 0.20 W/m.K)
+    thickness: 5.0e-4        # m (0.5 mm) -- adds t/k series resistance on the bottom face
+    location: bottom         # -height end, opposite the tabs
 
 tabs:
   # Footprint on the electrode (length x height) plane; thickness/material DEFAULT to the

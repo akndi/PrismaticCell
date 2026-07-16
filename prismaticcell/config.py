@@ -130,6 +130,23 @@ class Tab:
 
 
 @dataclass
+class Insulator:
+    """A solid insulating slab inside the can, spanning the full cell cross-section.
+
+    Models the bottom-insulation film of a prismatic cell: a thin polymer slab sitting on the
+    can floor (or under the lid) between the jellyrolls and the can, over the whole in-plane
+    footprint (electrode length x thickness). It electrically isolates the roll from the can and
+    adds thermal resistance on that heat path — so it matters when the corresponding face is
+    cooled. ``location`` selects which end of the HEIGHT axis it occupies: ``"bottom"`` = the
+    -height end (opposite the tabs, the usual place), ``"top"`` = the +height end. ``thickness``
+    is its extent along the height axis [m]; the rolls are shifted to rest against it. Purely a
+    thermal element here (the can carries no ECM current in this model)."""
+    material: str               # key into material database
+    thickness: float            # m, slab extent along the height axis
+    location: Literal["bottom", "top"] = "bottom"
+
+
+@dataclass
 class Enclosure:
     """Cell enclosure: pouch (laminate) or prismatic (metal can)."""
     kind: Literal["pouch", "prismatic"]
@@ -138,6 +155,7 @@ class Enclosure:
     contact_conductance: float  # W/m^2/K, stack<->wall interfacial conductance
     tab_heat_sink: bool = True  # if True, tabs conduct heat to ambient at their far end
                                 # (busbar/terminal heat-sunk near the coolant temperature)
+    insulator: Optional["Insulator"] = None  # bottom (or top) insulating slab; None = absent
     # How the enclosure wall is represented thermally:
     #  - "shell" (default): a sub-grid conductive shell wraps the cavity mesh, giving the wall
     #    in-plane spreading + through-wall BC + thermal mass WITHOUT resolving its (thin) thickness
@@ -408,6 +426,12 @@ class SimConfig:
                 errors.append(f"tab {t.polarity} size_length/size_height must be > 0")
         if self.enclosure.material not in known:
             errors.append(f"enclosure references unknown material '{self.enclosure.material}'")
+        ins = self.enclosure.insulator
+        if ins is not None:
+            if ins.material not in known:
+                errors.append(f"enclosure.insulator references unknown material '{ins.material}'")
+            if ins.thickness <= 0:
+                errors.append("enclosure.insulator.thickness must be > 0")
         # need at least one pos and one neg tab
         pol = {t.polarity for t in self.tabs}
         if "pos" not in pol or "neg" not in pol:

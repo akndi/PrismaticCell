@@ -229,6 +229,15 @@ Faces may be named **physically** (`top`/`bottom` = +z/-z, `x_min/x_max`, `y_min
   shell uses a single wall conductivity (`k_in` of the enclosure material) — no multi-material or
   variable-thickness wall. The contact resistance is applied on every external face (as in mesh
   mode), including faces backed by the clearance gap.
+- **Bottom/top insulator** (`enclosure.insulator`): the prismatic bottom-insulation film — a thin
+  polymer slab (e.g. polypropylene, `k ≈ 0.2 W/m·K`) over the full in-plane footprint, between the
+  jellyrolls and the can floor (`location: bottom`, the −height end opposite the tabs) or the lid
+  (`location: top`). Being sub-millimetre it is far thinner than one mesh cell, so like the wall it
+  is modelled as a **sub-grid conductive layer on the face it occupies**: (i) a series
+  resistance-area `t_ins/k_ins` added to that one face's external BC (in series with the wall shell
+  and contact), which throttles heat extraction when that face is cooled, and (ii) its areal heat
+  capacity `ρc_ins·t_ins·A` lumped onto that face's cells. Purely a thermal element (the can carries
+  no ECM current in this model). Absent when `enclosure.insulator` is unset.
 
 Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere; stack↔wall via a
 contact conductance; tab heat-loss path), **convection** (external Newton cooling; internal gaps

@@ -144,13 +144,15 @@ class ThermalOperator:
         diag_bc = np.zeros(N)
 
         def _apply_face(bc: FaceBC, cell_idx: np.ndarray, k_norm: np.ndarray,
-                        area: float, half_dist: float):
+                        area: float, half_dist: float, extra_R_area: float = 0.0):
             """Apply one external face's BC to the given boundary cells.
 
-            cell_idx : (M,) flat indices of the boundary cells on this face
-            k_norm   : (M,) directional conductivity normal to the face
-            area     : per-cell face area [m^2]
-            half_dist: cell-center-to-face distance [m]
+            cell_idx     : (M,) flat indices of the boundary cells on this face
+            k_norm       : (M,) directional conductivity normal to the face
+            area         : per-cell face area [m^2]
+            half_dist    : cell-center-to-face distance [m]
+            extra_R_area : extra series resistance-area [K*m^2/W] on this face (e.g. a bottom/top
+                           insulating slab), in series with the half-cell conduction + wall shell.
             """
             kind = bc.kind
             # Linearized radiative surface coefficient: q_rad = eps*sigma*(Ts^4 - Tinf^4)
@@ -166,8 +168,10 @@ class ThermalOperator:
                 h_rad = 0.0
             g_rad = h_rad * area
 
-            # Through-wall + contact series resistance (per cell) when the shell is active.
-            r_series = (half_dist / np.maximum(k_norm, 1e-300)) / area + shell_R_area / area
+            # Through-wall + contact series resistance (per cell) when the shell is active, plus
+            # any face-specific insulating layer (its resistance-area over the face area).
+            r_series = ((half_dist / np.maximum(k_norm, 1e-300)) / area
+                        + shell_R_area / area + extra_R_area / area)
 
             if kind == "dirichlet":
                 # fixed temperature at the OUTER wall surface, through the shell + half-cell
@@ -198,20 +202,27 @@ class ThermalOperator:
             g_amb[cell_idx] += g_bc
             gt_amb[cell_idx] += g_bc * bc.t_inf
 
+        # Per-face extra series resistance from a bottom/top insulating slab (sub-grid layer).
+        ins_face = str(getattr(geom, "insulator_face", ""))
+        ins_R = float(getattr(geom, "insulator_R_area", 0.0))
+        xR = {f: 0.0 for f in ("bottom", "top", "x_min", "x_max", "y_min", "y_max")}
+        if ins_face in xR:
+            xR[ins_face] = ins_R
+
         # top = +z max, bottom = -z min; sides map to x/y min/max.
         # z faces use kz, x faces use kx, y faces use ky.
         _apply_face(cooling.bottom, idx[:, :, 0].ravel(), kz[:, :, 0].ravel(),
-                    area_z, dz / 2.0)
+                    area_z, dz / 2.0, xR["bottom"])
         _apply_face(cooling.top, idx[:, :, -1].ravel(), kz[:, :, -1].ravel(),
-                    area_z, dz / 2.0)
+                    area_z, dz / 2.0, xR["top"])
         _apply_face(cooling.x_min, idx[0, :, :].ravel(), kx[0, :, :].ravel(),
-                    area_x, dx / 2.0)
+                    area_x, dx / 2.0, xR["x_min"])
         _apply_face(cooling.x_max, idx[-1, :, :].ravel(), kx[-1, :, :].ravel(),
-                    area_x, dx / 2.0)
+                    area_x, dx / 2.0, xR["x_max"])
         _apply_face(cooling.y_min, idx[:, 0, :].ravel(), ky[:, 0, :].ravel(),
-                    area_y, dy / 2.0)
+                    area_y, dy / 2.0, xR["y_min"])
         _apply_face(cooling.y_max, idx[:, -1, :].ravel(), ky[:, -1, :].ravel(),
-                    area_y, dy / 2.0)
+                    area_y, dy / 2.0, xR["y_max"])
 
         # --- Sub-grid wall shell: in-plane wall conduction (spreading + a metal path to the
         #     cooled faces) + wall thermal mass, on the cavity-boundary cells (PHYSICS §5). ---
@@ -243,6 +254,18 @@ class ThermalOperator:
             Mw3[:, :, 0] += mw * area_z; Mw3[:, :, -1] += mw * area_z
             Mw3[0, :, :] += mw * area_x; Mw3[-1, :, :] += mw * area_x
             Mw3[:, 0, :] += mw * area_y; Mw3[:, -1, :] += mw * area_y
+
+        # Insulating-slab thermal mass: lump the slab's areal heat capacity onto its face cells.
+        ins_mt = float(getattr(geom, "insulator_rhocp_t", 0.0))
+        if ins_face in xR and ins_mt > 0.0:
+            Mi3 = M_wall.reshape(nx, ny, nz)
+            _face_slice = {
+                "bottom": (np.s_[:, :, 0], area_z), "top": (np.s_[:, :, -1], area_z),
+                "x_min": (np.s_[0, :, :], area_x), "x_max": (np.s_[-1, :, :], area_x),
+                "y_min": (np.s_[:, 0, :], area_y), "y_max": (np.s_[:, -1, :], area_y),
+            }
+            sl, af = _face_slice[ins_face]
+            Mi3[sl] += ins_mt * af
 
         # Tab conduction-to-ambient heat loss (PHYSICS §5): the tab's far end is heat-sunk near
         # the coolant temperature. Distribute each polarity's tab thermal conductance over its

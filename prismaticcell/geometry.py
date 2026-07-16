@@ -26,6 +26,7 @@ REGION_CAN = 0
 REGION_GAP = 1
 REGION_ACTIVE = 2
 REGION_TAB = 3
+REGION_INSULATOR = 4   # bottom/top insulating slab (enclosure.insulator)
 
 _AX = {"x": 0, "y": 1, "z": 2}   # physical grid-axis index for each named axis
 
@@ -91,6 +92,13 @@ class Geometry:
     stack_axis: int = 2                # through-plane / thickness / sandwich-stacking axis
     len_axis: int = 0                  # electrode length (first in-plane axis)
     hgt_axis: int = 1                  # electrode height (second in-plane axis)
+    # Bottom/top insulating slab (enclosure.insulator). Being far thinner than one mesh cell it is
+    # represented as a sub-grid conductive layer on the height face it occupies (same technique as
+    # the wall shell): its series resistance-area is added to that face's BC and its areal heat
+    # capacity to that face's cells. Empty/zero when no insulator is configured.
+    insulator_face: str = ""           # physical face name it sits on ("bottom"/"top"/...), "" if none
+    insulator_R_area: float = 0.0      # K*m^2/W, series resistance-area t_ins/k_ins on that face
+    insulator_rhocp_t: float = 0.0     # J/m^2/K, areal heat capacity rho*cp*t_ins of the slab
 
     @property
     def n_active(self) -> int:
@@ -325,6 +333,20 @@ def build_geometry(cfg: SimConfig) -> Geometry:
     if tot_area > 0:
         cap_cv = area_eff_total / tot_area * cfg.ecm.capacity_Ah
 
+    # Bottom/top insulating slab: a sub-grid conductive layer on the height-axis face it occupies
+    # (bottom = -height end, opposite the tabs). Its series resistance t_ins/k_ins throttles heat
+    # flow to that face and its (small) heat capacity is lumped onto the face cells.
+    ins_cfg = cfg.enclosure.insulator
+    ins_face = ""
+    ins_R_area = 0.0
+    ins_rhocp_t = 0.0
+    if ins_cfg is not None:
+        ins_mat = cfg.materials[ins_cfg.material]
+        ins_R_area = ins_cfg.thickness / ins_mat.k_through   # through-plane resistance-area
+        ins_rhocp_t = ins_mat.density * ins_mat.cp * ins_cfg.thickness
+        _face_names = {0: ("x_min", "x_max"), 1: ("y_min", "y_max"), 2: ("bottom", "top")}
+        ins_face = _face_names[ha][0 if ins_cfg.location == "bottom" else 1]
+
     return Geometry(
         grid=grid,
         region=region,
@@ -342,6 +364,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         wall_k=(can_mat.k_in if shell else 0.0),
         wall_rhocp=(can_mat.density * can_mat.cp if shell else 0.0),
         stack_axis=sa, len_axis=la, hgt_axis=ha,
+        insulator_face=ins_face, insulator_R_area=ins_R_area, insulator_rhocp_t=ins_rhocp_t,
     )
 
 

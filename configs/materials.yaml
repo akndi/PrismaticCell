@@ -50,3 +50,10 @@ materials:
     k_through: 0.03
     k_in: 0.03
     sigma_elec: 0.0
+
+  pp_insulator:            # polypropylene bottom-insulation film (electrically insulating)
+    density: 905.0         # kg/m^3
+    cp: 1900.0             # J/kg/K
+    k_through: 0.20        # W/m/K
+    k_in: 0.20
+    sigma_elec: 0.0
