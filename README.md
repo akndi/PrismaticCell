@@ -35,7 +35,9 @@ with anisotropy, cooling faces and plots all in those physical axes. See
   An optional **bottom/top insulator** (`enclosure.insulator`, e.g. a 0.5 mm polypropylene film on
   the can floor) and a **jellyroll wrap** (`assembly.roll_wrap`, e.g. 50 µm mylar on the roll's
   side faces) are sub-grid conductive layers that add their `t/k` resistance in series on the
-  relevant faces — throttling heat removal where those faces are cooled.
+  relevant faces — throttling heat removal where those faces are cooled. The cavity void is filled
+  per `assembly.cavity_fill` (`gap_air` dry, or `electrolyte` for a flooded cell); the roll-to-can
+  clearance conducts through this fill, so a flooded cell couples the roll to the can much better.
 - **Two collector fidelities** (`solver.collector_model`) — `planar` (2.5-D: one shared foil
   potential per jellyroll; fast) or `layered` (full 3-D collector: a separate foil potential per
   through-thickness stack layer, parallel at the tabs — resolves through-thickness potential

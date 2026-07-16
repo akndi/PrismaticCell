@@ -124,6 +124,8 @@ class Assembly:
     inter_gap: float = 1e-3     # m, gap between adjacent jellyrolls
     wall_clearance: float = 5e-4  # m, gap between roll bounding box and can wall
     roll_wrap: Optional["Wrap"] = None  # film wrapped around each jellyroll's side faces; None=absent
+    cavity_fill: str = "gap_air"  # material filling the void (clearance/inter-roll/headspace):
+                                  # "gap_air" (dry) or e.g. "electrolyte" (flooded cell)
 
 
 @dataclass
@@ -454,6 +456,9 @@ class SimConfig:
                 errors.append(f"enclosure.insulator references unknown material '{ins.material}'")
             if ins.thickness <= 0:
                 errors.append("enclosure.insulator.thickness must be > 0")
+        if self.assembly.cavity_fill not in known:
+            errors.append(f"assembly.cavity_fill references unknown material "
+                          f"'{self.assembly.cavity_fill}'")
         wrap = self.assembly.roll_wrap
         if wrap is not None:
             if wrap.material not in known:

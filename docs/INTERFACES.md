@@ -59,7 +59,8 @@ def build_geometry(cfg: SimConfig) -> Geometry: ...
 Construction rules: outer box = can wall (`enclosure.wall_thickness`) around a cavity holding the
 jellyrolls (arranged per `assembly.arrangement`, separated by `inter_gap`, `wall_clearance` to the
 wall). Uniform grid. Tag each cell by center location: can-wall shell → REGION_CAN
-(`isotropic_props(can material)`); clearance/inter-roll bands → REGION_GAP (`gap_air`); inside a
+(`isotropic_props(can material)`); clearance/inter-roll bands → REGION_GAP (filled with
+`assembly.cavity_fill`, e.g. `gap_air` or `electrolyte`); inside a
 roll bbox → REGION_ACTIVE with `materials.homogenize(sandwich_layers)` mapped so **k_z = through-
 plane, k_x=k_y = in-plane**. `cap_cv` normalized so it sums exactly to `cfg.ecm.capacity_Ah`.
 Foil sheet conductance uses the collector layer's `sigma_elec` × its thickness × `n_stacks`. Tab
@@ -73,7 +74,9 @@ on each roll's side faces) — are aggregated into `geom.face_R_area` and `geom.
 keyed by physical face name (`t/k` [K·m²/W] and `ρc·t` [J/m²/K], summed where layers coincide).
 `thermal.py` adds `face_R_area[f]` in series on face `f`'s BC and lumps `face_rhocp_t[f]` onto its
 cells (neither is meshed as a region). The insulator's single-face values are also kept as
-`insulator_face` / `insulator_R_area` / `insulator_rhocp_t` for reference.
+`insulator_face` / `insulator_R_area` / `insulator_rhocp_t` for reference. In shell mode the
+roll-to-can `wall_clearance` (filled with `cavity_fill`) also contributes `wall_clearance/k_fill`
+to every external face via the same dicts.
 
 ---
 

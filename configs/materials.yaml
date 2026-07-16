@@ -51,6 +51,13 @@ materials:
     k_in: 0.03
     sigma_elec: 0.0
 
+  electrolyte:             # free liquid electrolyte filling the cavity void (carbonate + LiPF6)
+    density: 1200.0        # kg/m^3
+    cp: 2000.0             # J/kg/K
+    k_through: 0.60        # W/m/K
+    k_in: 0.60
+    sigma_elec: 0.0        # electronically insulating (ionic conduction not modelled thermally here)
+
   pp_insulator:            # polypropylene bottom-insulation film (electrically insulating)
     density: 905.0         # kg/m^3
     cp: 1900.0             # J/kg/K

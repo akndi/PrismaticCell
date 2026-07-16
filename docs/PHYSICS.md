@@ -245,6 +245,13 @@ Faces may be named **physically** (`top`/`bottom` = +z/-z, `x_min/x_max`, `y_min
   faces bordering the can/ambient carry it; the internal inter-roll faces are neglected (their wrap
   resistance is negligible next to the air gap). Per-face contributions from the insulator and the
   wrap **add in series** where they coincide.
+- **Cavity fill** (`assembly.cavity_fill`): the material filling the void left between the roll
+  assembly (with its films) and the can — the roll-to-can clearance, the inter-roll gap, and any
+  headspace. `gap_air` for a dry cell or `electrolyte` for a flooded one (the usual case). The
+  roll-to-can clearance (`wall_clearance`) is treated as a sub-grid conduction layer: on each
+  external face it contributes `wall_clearance/k_fill` in series (with the fill's areal mass), so
+  the fill choice actually changes roll↔can heat transfer — electrolyte (`k≈0.6`) couples ~20×
+  better than air (`k≈0.03`). Resolved gap cells (on a fine mesh) use the same fill material.
 
 Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere; stack↔wall via a
 contact conductance; tab heat-loss path), **convection** (external Newton cooling; internal gaps

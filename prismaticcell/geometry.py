@@ -191,12 +191,13 @@ def build_geometry(cfg: SimConfig) -> Geometry:
     rho_cp = np.zeros((nx, ny, nz))
 
     can_mat = cfg.materials[cfg.enclosure.material]
-    gap_mat = cfg.materials.get("gap_air")
+    fill_name = cfg.assembly.cavity_fill
+    gap_mat = cfg.materials.get(fill_name)
     if gap_mat is None:
         raise ValueError(
-            "No 'gap_air' material defined. The inter-roll/clearance gaps need an explicit "
-            "filler material (define a low-conductivity 'gap_air' entry in the material DB) "
-            "rather than silently inheriting the metal can's properties."
+            f"No '{fill_name}' material defined (assembly.cavity_fill). The cavity void "
+            "(clearance / inter-roll / headspace) needs an explicit filler material in the "
+            "material DB (e.g. 'gap_air' for a dry cell or 'electrolyte' for a flooded one)."
         )
     can_props = isotropic_props(can_mat, dz)
     gap_props = isotropic_props(gap_mat, dz)
@@ -374,6 +375,19 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         for ax in axes:
             for face in _face_names[ax]:
                 _add_face_layer(face, w_R, w_mt)
+
+    # Roll-to-can clearance filled with the cavity_fill material (e.g. electrolyte in a flooded
+    # cell, air in a dry one). In shell mode the clearance is sub-grid (thinner than a cell), so add
+    # its conduction resistance-area t/k in series on every external face and its areal heat capacity
+    # to those cells -- this is what makes the fill choice (air k=0.03 vs electrolyte k=0.6) actually
+    # change roll<->can heat transfer, independent of mesh. The internal inter-roll gap is left to
+    # the meshed gap cells (resolved only on a fine enough grid).
+    if shell and clr > 0.0 and gap_mat.k_through > 0.0:
+        r_clr = clr / gap_mat.k_through
+        m_clr = gap_mat.density * gap_mat.cp * clr
+        for ax in (0, 1, 2):
+            for face in _face_names[ax]:
+                _add_face_layer(face, r_clr, m_clr)
 
     return Geometry(
         grid=grid,

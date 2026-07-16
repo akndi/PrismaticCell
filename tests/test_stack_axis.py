@@ -26,6 +26,7 @@ def _mats():
         "gap_air": Material("gap_air", 1.2, 1005, 0.03, 0.03, 0.0),
         "pp_insulator": Material("pp_insulator", 905, 1900, 0.20, 0.20, 0.0),
         "mylar_film": Material("mylar_film", 1390, 1170, 0.15, 0.15, 0.0),
+        "electrolyte": Material("electrolyte", 1200, 2000, 0.60, 0.60, 0.0),
     }
 
 
@@ -215,27 +216,31 @@ def test_insulator_throttles_bottom_cooling():
 
 def test_roll_wrap_covers_side_faces():
     """A 'sides' mylar wrap adds series resistance on the big (stack-axis) AND end (length-axis)
-    external faces, but not the height ends; each equals t/k."""
+    external faces, but not the height ends; each adds t/k on top of the clearance baseline."""
     from prismaticcell.config import Wrap
+    base = build_geometry(_cfg("y", width=0.20, height=0.12)).face_R_area   # clearance-only baseline
     cfg = _cfg("y", width=0.20, height=0.12)   # stack=Y, length=X, height=Z
     cfg.assembly.roll_wrap = Wrap("mylar_film", thickness=5e-5, coverage="sides")
     g = build_geometry(cfg)
     R = 5e-5 / 0.15
     # big faces (normal to stack axis Y) = y_min/y_max; end faces (normal to length X) = x_min/x_max
-    assert np.isclose(g.face_R_area["y_min"], R) and np.isclose(g.face_R_area["y_max"], R)
-    assert np.isclose(g.face_R_area["x_min"], R) and np.isclose(g.face_R_area["x_max"], R)
-    # height ends (top/bottom) are open -> no wrap there
-    assert g.face_R_area.get("top", 0.0) == 0.0 and g.face_R_area.get("bottom", 0.0) == 0.0
+    for f in ("y_min", "y_max", "x_min", "x_max"):
+        assert np.isclose(g.face_R_area[f] - base.get(f, 0.0), R)
+    # height ends (top/bottom) are open -> wrap adds nothing there
+    for f in ("top", "bottom"):
+        assert np.isclose(g.face_R_area[f] - base.get(f, 0.0), 0.0)
 
 
 def test_roll_wrap_and_insulator_compose_on_bottom():
     """Insulator (bottom) and an 'all'-coverage wrap stack in series on the same bottom face."""
     from prismaticcell.config import Wrap, Insulator
+    base = build_geometry(_cfg("y", width=0.20, height=0.12)).face_R_area.get("bottom", 0.0)
     cfg = _cfg("y", width=0.20, height=0.12)
     cfg.enclosure.insulator = Insulator("pp_insulator", thickness=5e-4, location="bottom")
     cfg.assembly.roll_wrap = Wrap("mylar_film", thickness=5e-5, coverage="all")
     g = build_geometry(cfg)
-    assert np.isclose(g.face_R_area["bottom"], 5e-4 / 0.20 + 5e-5 / 0.15)   # insulator + wrap
+    # bottom now carries clearance (base) + insulator + wrap, all in series
+    assert np.isclose(g.face_R_area["bottom"] - base, 5e-4 / 0.20 + 5e-5 / 0.15)
 
 
 def test_roll_wrap_throttles_side_cooling():
@@ -254,6 +259,32 @@ def test_roll_wrap_throttles_side_cooling():
     r_no = coupling.run(mk(False))
     r_wrap = coupling.run(mk(True))
     assert r_wrap.T_max[-1] > r_no.T_max[-1] + 1e-3
+
+
+def test_cavity_fill_material_sets_clearance_resistance():
+    """The cavity_fill (air vs electrolyte) sets the roll-to-can clearance conduction on every
+    external face: R_area = wall_clearance / k_fill. Electrolyte (k=0.6) >> air (k=0.03) coupling."""
+    def clearance_R(fill):
+        cfg = _cfg("y", width=0.20, height=0.12)
+        cfg.assembly.cavity_fill = fill
+        return build_geometry(cfg).face_R_area
+
+    clr = 5e-4   # _cfg default wall_clearance
+    air = clearance_R("gap_air")
+    ely = clearance_R("electrolyte")
+    # every external face carries the clearance layer
+    for f in ("x_min", "x_max", "y_min", "y_max", "top", "bottom"):
+        assert np.isclose(air[f], clr / 0.03)
+    # electrolyte-filled clearance is ~20x less resistive than air
+    assert np.isclose(ely["top"], clr / 0.60)
+    assert ely["top"] < 0.1 * air["top"]
+
+
+def test_cavity_fill_unknown_material_rejected():
+    cfg = _cfg("y", width=0.20, height=0.12)
+    cfg.assembly.cavity_fill = "nonexistent_fluid"
+    with pytest.raises(ValueError):
+        cfg.validate()
 
 
 def test_roll_wrap_unknown_material_rejected():
