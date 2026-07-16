@@ -109,6 +109,11 @@ class Geometry:
     # the rolls impedes heat flow. Zero when the rolls touch (inter_gap=0) or there is one roll.
     inter_roll_R_area: float = 0.0     # K*m^2/W, inter_gap / k_fill
     inter_roll_rhocp_t: float = 0.0    # J/m^2/K, inter_gap areal heat capacity
+    # External-face ambient-exchange area scale (real can face / meshed roll face). In a fixed can
+    # the mesh is the roll bbox, so convective/radiative cooling would otherwise be credited over
+    # the roll footprint; thermal.py multiplies each face's ambient conductance by this. 1.0 when
+    # not fixed-can (the cavity boundary already is the external surface).
+    face_area_scale: Dict[str, float] = field(default_factory=dict)
 
     @property
     def n_active(self) -> int:
@@ -189,13 +194,19 @@ def build_geometry(cfg: SimConfig) -> Geometry:
                     f"{inner[ax]*1e3:.2f} mm < roll {tight[ax]*1e3:.2f} mm"
                     + (f" + insulator {t_ins_val*1e3:.2f} mm" if ax == ha else "")
                     + ". Increase outer_dims or reduce the roll/insulator.")
-        cav = list(tight)
         L = list(tight)                       # meshed domain = roll bbox (wall is sub-grid)
         roll_lo = [0.0, 0.0, 0.0]
-    else:
+    elif shell:
+        # Shell mode (auto-sized): also mesh only the roll bbox. The uniform wall_clearance is a
+        # SUB-GRID layer (added below), never meshed -- so the clearance is not counted both as a
+        # gap cell and as a sub-grid resistance (the double-count the explicit path already avoids).
         inner = None
-        cav = [tight[ax] + 2.0 * clr for ax in (0, 1, 2)]
-        L = [cav[ax] + 2.0 * wall for ax in (0, 1, 2)]
+        L = list(tight)
+        roll_lo = [0.0, 0.0, 0.0]
+    else:
+        # Mesh mode: the wall and the clearance are resolved as volume cells at the box edge.
+        inner = None
+        L = [tight[ax] + 2.0 * clr + 2.0 * wall for ax in (0, 1, 2)]
         roll_lo = [wall + clr, wall + clr, wall + clr]
     Lx, Ly, Lz = L
 
@@ -447,6 +458,17 @@ def build_geometry(cfg: SimConfig) -> Geometry:
             for face in _face_names[ax]:
                 _add_face_layer(face, r_clr, m_clr)
 
+    # Ambient-exchange area scale: in a fixed can the mesh is the roll bbox, so each external face's
+    # convective/radiative cooling must be credited over the real can OUTER face, not the roll face.
+    face_area_scale: Dict[str, float] = {}
+    if explicit:
+        for ax in (0, 1, 2):
+            b, c = [q for q in (0, 1, 2) if q != ax]      # the two axes spanning this face
+            roll_A = tight[b] * tight[c]
+            scale = (outer[b] * outer[c] / roll_A) if roll_A > 0.0 else 1.0
+            for face in _face_names[ax]:
+                face_area_scale[face] = scale
+
     return Geometry(
         grid=grid,
         region=region,
@@ -467,6 +489,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         insulator_face=ins_face, insulator_R_area=ins_R_area, insulator_rhocp_t=ins_rhocp_t,
         face_R_area=face_R_area, face_rhocp_t=face_rhocp_t,
         inter_roll_R_area=inter_roll_R_area, inter_roll_rhocp_t=inter_roll_rhocp_t,
+        face_area_scale=face_area_scale,
     )
 
 

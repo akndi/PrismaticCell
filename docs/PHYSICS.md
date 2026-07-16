@@ -265,7 +265,12 @@ Faces may be named **physically** (`top`/`bottom` = +z/-z, `x_min/x_max`, `y_min
   (electrolyte, up to the roll top), each contributing `clearance/k_fill` on its face; the leftover
   space above the roll is the gas **headspace** (`enclosure.headspace_fill`), contributing
   `headspace/k_gas` on the top face — a large resistance, so a gas headspace nearly insulates the
-  top (top-face cooling becomes ineffective, as physically expected).
+  top (top-face cooling becomes ineffective, as physically expected). Because a fixed can meshes only
+  the roll bbox, each external face's convective/radiative exchange (and any imposed flux) is scaled
+  by the real can-face area / roll-face area so cooling is credited over the full can surface, not
+  the roll footprint. (Auto-sized shell mode also meshes the roll bbox, with the uniform
+  `wall_clearance` as the sub-grid layer — so the clearance is never both a gap cell and a sub-grid
+  resistance.)
 
 Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere; stack↔wall via a
 contact conductance; tab heat-loss path), **convection** (external Newton cooling; internal gaps

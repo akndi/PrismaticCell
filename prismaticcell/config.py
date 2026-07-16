@@ -191,7 +191,10 @@ class Enclosure:
     # bottom insulator (bottom-referenced in height) and is centred in the two in-plane axes, the
     # side clearances are filled with `assembly.cavity_fill` up to the roll top, and the leftover
     # space above the roll is the gas headspace. When None, the cavity is auto-sized (roll + uniform
-    # `assembly.wall_clearance`).
+    # `assembly.wall_clearance`). "Height"/"top"/"bottom" here mean the HEIGHT axis (the second
+    # in-plane axis, set by `assembly.stack_axis`), NOT necessarily the physical +z face -- so
+    # `stack_axis` must match the cell's real vertical for the headspace to land on top. Requires
+    # `wall_model: shell` (a fixed can meshes the roll bbox with a sub-grid wall).
     outer_dims: Optional[List[float]] = None
     headspace_fill: str = "gap_air"   # gas filling the headspace above the roll (electrolyte level)
 
@@ -465,12 +468,19 @@ class SimConfig:
             if self.enclosure.headspace_fill not in known:
                 errors.append(f"enclosure.headspace_fill references unknown material "
                               f"'{self.enclosure.headspace_fill}'")
+            if self.enclosure.wall_model == "mesh":
+                errors.append("enclosure.outer_dims requires wall_model 'shell' (a fixed can meshes "
+                              "the roll bbox and represents the wall as a sub-grid shell); remove "
+                              "outer_dims or set wall_model: shell")
         ins = self.enclosure.insulator
         if ins is not None:
             if ins.material not in known:
                 errors.append(f"enclosure.insulator references unknown material '{ins.material}'")
             if ins.thickness <= 0:
                 errors.append("enclosure.insulator.thickness must be > 0")
+            if ins.location not in ("bottom", "top"):
+                errors.append(f"enclosure.insulator.location must be 'bottom' or 'top', "
+                              f"got '{ins.location}'")
         if self.assembly.cavity_fill not in known:
             errors.append(f"assembly.cavity_fill references unknown material "
                           f"'{self.assembly.cavity_fill}'")
@@ -480,6 +490,9 @@ class SimConfig:
                 errors.append(f"assembly.roll_wrap references unknown material '{wrap.material}'")
             if wrap.thickness <= 0:
                 errors.append("assembly.roll_wrap.thickness must be > 0")
+            if wrap.coverage not in ("sides", "big_faces", "ends", "all"):
+                errors.append(f"assembly.roll_wrap.coverage must be one of "
+                              f"sides/big_faces/ends/all, got '{wrap.coverage}'")
         # need at least one pos and one neg tab
         pol = {t.polarity for t in self.tabs}
         if "pos" not in pol or "neg" not in pol:

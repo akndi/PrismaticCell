@@ -338,6 +338,57 @@ def test_inter_roll_gap_decouples_rolls():
     assert r_gap.T_max[-1] > r_touch.T_max[-1] + 1e-4
 
 
+def test_explicit_can_rotated_axis_maps_faces():
+    """The fixed-can void follows the axis roles: for stack_axis='z' (height=Y), the insulator is
+    on y_min, the headspace on y_max, and side clearances on the X (length) and Z (stack) faces."""
+    from prismaticcell.config import Insulator
+    wall = 0.8e-3
+    cfg = _cfg("z", width=0.20, height=0.12, n_stacks=6)   # stack=Z, length=X, height=Y
+    cfg.assembly.cavity_fill = "electrolyte"
+    cfg.enclosure.insulator = Insulator("pp_insulator", thickness=5e-4, location="bottom")
+    cfg.enclosure.headspace_fill = "gap_air"
+    cfg.enclosure.outer_dims = [0.2096, 0.1281, 0.005976]   # [X, Y=height, Z=stack] outer
+    g = build_geometry(cfg)
+    assert g.hgt_axis == 1 and g.insulator_face == "y_min"          # height = Y here
+    ins = 5e-4 / 0.20
+    hs = (0.1281 - 2 * wall) - 5e-4 - 0.12
+    assert np.isclose(g.face_R_area["y_min"], ins)                  # insulator on -height (y_min)
+    assert hs > 0 and np.isclose(g.face_R_area["y_max"], hs / 0.03)  # headspace on +height (y_max)
+    side_x = ((0.2096 - 2 * wall) - 0.20) / 2.0                     # length clearance on x faces
+    assert np.isclose(g.face_R_area["x_min"], side_x / 0.60)
+
+
+def test_fixed_can_credits_cooling_over_can_surface():
+    """In fixed-can mode the ambient exchange is scaled to the real can face (mesh is the roll bbox);
+    auto-size mode leaves it at 1 (the cavity boundary already is the external surface)."""
+    cfg = SimConfig.from_yaml(os.path.join(os.path.dirname(__file__), "..", "configs",
+                                           "large_prismatic.yaml"))
+    g = build_geometry(cfg)
+    Lx, Ly, Lz = cfg.enclosure.outer_dims       # [X, Y(thick), Z(height)]
+    # big front/back faces are normal to Y (stack axis): they span X*Z
+    assert np.isclose(g.face_area_scale["y_min"], (Lx * Lz) / (0.720 * 0.120))
+    assert all(v > 1.0 for v in g.face_area_scale.values())
+    assert build_geometry(_cfg("y", width=0.20, height=0.12)).face_area_scale == {}   # auto: unscaled
+
+
+def test_new_enclosure_assembly_field_validation():
+    """Typos in insulator.location / roll_wrap.coverage, and mesh + outer_dims, are rejected."""
+    from prismaticcell.config import Insulator, Wrap
+    cfg = _cfg("y", width=0.20, height=0.12)
+    cfg.enclosure.insulator = Insulator("pp_insulator", 5e-4, location="botom")   # typo
+    with pytest.raises(ValueError):
+        cfg.validate()
+    cfg.enclosure.insulator = None
+    cfg.assembly.roll_wrap = Wrap("mylar_film", 5e-5, coverage="sidez")           # typo
+    with pytest.raises(ValueError):
+        cfg.validate()
+    cfg.assembly.roll_wrap = None
+    cfg.enclosure.outer_dims = [0.30, 0.30, 0.30]
+    cfg.enclosure.wall_model = "mesh"                                             # contradiction
+    with pytest.raises(ValueError):
+        cfg.validate()
+
+
 def test_cavity_fill_unknown_material_rejected():
     cfg = _cfg("y", width=0.20, height=0.12)
     cfg.assembly.cavity_fill = "nonexistent_fluid"

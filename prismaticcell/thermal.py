@@ -166,7 +166,8 @@ class ThermalOperator:
         diag_bc = np.zeros(N)
 
         def _apply_face(bc: FaceBC, cell_idx: np.ndarray, k_norm: np.ndarray,
-                        area: float, half_dist: float, extra_R_area: float = 0.0):
+                        area: float, half_dist: float, extra_R_area: float = 0.0,
+                        area_scale: float = 1.0):
             """Apply one external face's BC to the given boundary cells.
 
             cell_idx     : (M,) flat indices of the boundary cells on this face
@@ -175,8 +176,12 @@ class ThermalOperator:
             half_dist    : cell-center-to-face distance [m]
             extra_R_area : extra series resistance-area [K*m^2/W] on this face (e.g. a bottom/top
                            insulating slab), in series with the half-cell conduction + wall shell.
+            area_scale   : multiplies the ambient (convective+radiative) exchange and imposed flux so
+                           cooling is credited over the real can face (fixed-can mode meshes the roll
+                           bbox). The conduction path (r_series) keeps the roll-face area.
             """
             kind = bc.kind
+            amb_area = area * area_scale        # real external (can) surface area per boundary cell
             # Linearized radiative surface coefficient: q_rad = eps*sigma*(Ts^4 - Tinf^4)
             #   ~= h_rad*(Ts - Tinf). Linearize about the mean film temperature Tm=(Ts+Tinf)/2
             #   when a surface-T estimate is available (error <0.6% to ΔT~80 K), else about Tinf.
@@ -188,7 +193,7 @@ class ThermalOperator:
                 h_rad = 4.0 * bc.emissivity * SIGMA_SB * t_m**3
             else:
                 h_rad = 0.0
-            g_rad = h_rad * area
+            g_rad = h_rad * amb_area
 
             # Through-wall + contact series resistance (per cell) when the shell is active, plus
             # any face-specific insulating layer (its resistance-area over the face area).
@@ -205,14 +210,14 @@ class ThermalOperator:
                 return
 
             if kind == "neumann":
-                # -k dT/dn = flux  (flux>0 leaves the cell). Heat INTO cell = -flux*area.
-                q_out = bc.flux * area
+                # -k dT/dn = flux  (flux>0 leaves the cell). Heat INTO cell = -flux*(can area).
+                q_out = bc.flux * amb_area
                 b_bc[cell_idx] += -q_out
                 q_flux_out[cell_idx] += q_out
 
             # Surface-to-ambient conductance: convective film and radiation act in PARALLEL,
             # in SERIES with the half-cell conduction from the cell center to the surface.
-            g_film = bc.h * area if (kind == "convection" and bc.h > 0.0) else 0.0
+            g_film = bc.h * amb_area if (kind == "convection" and bc.h > 0.0) else 0.0
             g_surface = g_film + g_rad
             if np.isscalar(g_surface) and g_surface <= 0.0:
                 return                                            # adiabatic / pure-flux, no ambient path
@@ -232,21 +237,23 @@ class ThermalOperator:
             if _if:
                 face_R[_if] = float(getattr(geom, "insulator_R_area", 0.0))
         xR = {f: float(face_R.get(f, 0.0)) for f in six_faces}
+        fscale = dict(getattr(geom, "face_area_scale", {}) or {})
+        aS = {f: float(fscale.get(f, 1.0)) for f in six_faces}
 
         # top = +z max, bottom = -z min; sides map to x/y min/max.
         # z faces use kz, x faces use kx, y faces use ky.
         _apply_face(cooling.bottom, idx[:, :, 0].ravel(), kz[:, :, 0].ravel(),
-                    area_z, dz / 2.0, xR["bottom"])
+                    area_z, dz / 2.0, xR["bottom"], aS["bottom"])
         _apply_face(cooling.top, idx[:, :, -1].ravel(), kz[:, :, -1].ravel(),
-                    area_z, dz / 2.0, xR["top"])
+                    area_z, dz / 2.0, xR["top"], aS["top"])
         _apply_face(cooling.x_min, idx[0, :, :].ravel(), kx[0, :, :].ravel(),
-                    area_x, dx / 2.0, xR["x_min"])
+                    area_x, dx / 2.0, xR["x_min"], aS["x_min"])
         _apply_face(cooling.x_max, idx[-1, :, :].ravel(), kx[-1, :, :].ravel(),
-                    area_x, dx / 2.0, xR["x_max"])
+                    area_x, dx / 2.0, xR["x_max"], aS["x_max"])
         _apply_face(cooling.y_min, idx[:, 0, :].ravel(), ky[:, 0, :].ravel(),
-                    area_y, dy / 2.0, xR["y_min"])
+                    area_y, dy / 2.0, xR["y_min"], aS["y_min"])
         _apply_face(cooling.y_max, idx[:, -1, :].ravel(), ky[:, -1, :].ravel(),
-                    area_y, dy / 2.0, xR["y_max"])
+                    area_y, dy / 2.0, xR["y_max"], aS["y_max"])
 
         # --- Sub-grid wall shell: in-plane wall conduction (spreading + a metal path to the
         #     cooled faces) + wall thermal mass, on the cavity-boundary cells (PHYSICS §5). ---
