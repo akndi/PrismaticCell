@@ -38,6 +38,10 @@ with anisotropy, cooling faces and plots all in those physical axes. See
   relevant faces — throttling heat removal where those faces are cooled. The cavity void is filled
   per `assembly.cavity_fill` (`gap_air` dry, or `electrolyte` for a flooded cell); the roll-to-can
   clearance conducts through this fill, so a flooded cell couples the roll to the can much better.
+  Give `enclosure.outer_dims` to fix the can size (instead of auto-sizing to the roll): the roll
+  then sits on the insulator (bottom-referenced) and is centred in-plane, electrolyte fills the side
+  clearances up to the roll top, and the leftover height is the gas **headspace**
+  (`enclosure.headspace_fill`) — which nearly insulates the top face.
 - **Two collector fidelities** (`solver.collector_model`) — `planar` (2.5-D: one shared foil
   potential per jellyroll; fast) or `layered` (full 3-D collector: a separate foil potential per
   through-thickness stack layer, parallel at the tabs — resolves through-thickness potential

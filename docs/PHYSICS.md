@@ -252,6 +252,16 @@ Faces may be named **physically** (`top`/`bottom` = +z/-z, `x_min/x_max`, `y_min
   external face it contributes `wall_clearance/k_fill` in series (with the fill's areal mass), so
   the fill choice actually changes roll↔can heat transfer — electrolyte (`k≈0.6`) couples ~20×
   better than air (`k≈0.03`). Resolved gap cells (on a fine mesh) use the same fill material.
+- **Fixed can + placement** (`enclosure.outer_dims`): by default the cavity is auto-sized to hug
+  the roll (uniform `wall_clearance`). Giving a fixed can outer size instead sets the inner cavity =
+  `outer_dims − 2·wall_thickness`, meshes only the roll bounding box, and represents the wall,
+  clearances and headspace as sub-grid layers. The roll is **bottom-referenced** (sits on the
+  insulator, all leftover height becomes headspace on the top face) and **centred in the two
+  in-plane axes** (symmetric side clearances). The side clearances are filled with `cavity_fill`
+  (electrolyte, up to the roll top), each contributing `clearance/k_fill` on its face; the leftover
+  space above the roll is the gas **headspace** (`enclosure.headspace_fill`), contributing
+  `headspace/k_gas` on the top face — a large resistance, so a gas headspace nearly insulates the
+  top (top-face cooling becomes ineffective, as physically expected).
 
 Heat-transfer modes covered: **conduction** (3-D anisotropic, everywhere; stack↔wall via a
 contact conductance; tab heat-loss path), **convection** (external Newton cooling; internal gaps

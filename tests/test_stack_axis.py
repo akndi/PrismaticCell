@@ -280,6 +280,37 @@ def test_cavity_fill_material_sets_clearance_resistance():
     assert ely["top"] < 0.1 * air["top"]
 
 
+def test_explicit_can_placement_and_void():
+    """A fixed can (outer_dims) meshes the roll bbox; roll is bottom-referenced on the insulator
+    (headspace all on top) and centred in-plane (electrolyte side clearances)."""
+    from prismaticcell.config import Insulator
+    wall = 0.8e-3     # _cfg enclosure wall thickness
+    cfg = _cfg("y", width=0.20, height=0.12, n_stacks=6)
+    cfg.assembly.cavity_fill = "electrolyte"
+    cfg.enclosure.insulator = Insulator("pp_insulator", thickness=5e-4, location="bottom")
+    cfg.enclosure.headspace_fill = "gap_air"
+    cfg.enclosure.outer_dims = [0.2096, 0.005976, 0.1281]   # [X len, Y thick, Z height] outer
+    g = build_geometry(cfg)
+    assert tuple(round(v, 6) for v in g.outer_dims) == (0.2096, 0.005976, 0.1281)  # reports the can
+    # bottom = insulator only: the roll sits on it, so there is NO electrolyte clearance below
+    assert np.isclose(g.face_R_area["bottom"], 5e-4 / 0.20)
+    # top = gas headspace = all the leftover height (bottom-referenced placement)
+    hs = (0.1281 - 2 * wall) - 5e-4 - 0.12
+    assert hs > 0 and np.isclose(g.face_R_area["top"], hs / 0.03)     # gap_air k=0.03
+    # length ends (X) = centred electrolyte side clearance (k=0.6), equal on both faces
+    side_x = ((0.2096 - 2 * wall) - 0.20) / 2.0
+    assert np.isclose(g.face_R_area["x_min"], side_x / 0.60)
+    assert np.isclose(g.face_R_area["x_max"], side_x / 0.60)
+
+
+def test_explicit_can_too_small_raises():
+    """A can smaller than the roll assembly is rejected with a clear error."""
+    cfg = _cfg("y", width=0.20, height=0.12, n_stacks=6)
+    cfg.enclosure.outer_dims = [0.10, 0.005, 0.05]     # far smaller than the 0.20 m roll
+    with pytest.raises(ValueError):
+        build_geometry(cfg)
+
+
 def test_cavity_fill_unknown_material_rejected():
     cfg = _cfg("y", width=0.20, height=0.12)
     cfg.assembly.cavity_fill = "nonexistent_fluid"

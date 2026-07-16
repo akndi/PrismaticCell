@@ -52,13 +52,15 @@ assembly:
 enclosure:
   kind: prismatic
   material: can_al
-  wall_thickness: 1.0e-3
+  wall_thickness: 4.0e-4     # m (0.4 mm) fixed can wall, all faces
+  outer_dims: [0.730, 0.0153, 0.130]   # fixed can OUTER size [X len, Y thick, Z height], m
+  headspace_fill: gap_air    # gas headspace above the roll (electrolyte level = roll top)
   contact_conductance: 150.0
   wall_model: shell
   tab_heat_sink: true
   insulator:                 # bottom-insulation film: full-footprint slab on the can floor
     material: pp_insulator   # polypropylene (k ~ 0.20 W/m.K)
-    thickness: 5.0e-4        # m (0.5 mm) -- adds t/k series resistance on the bottom face
+    thickness: 5.0e-4        # m (0.5 mm) -- roll sits on this; adds t/k series R on the bottom face
     location: bottom         # -height end, opposite the tabs
 
 tabs:

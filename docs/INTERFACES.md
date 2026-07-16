@@ -76,7 +76,10 @@ keyed by physical face name (`t/k` [K·m²/W] and `ρc·t` [J/m²/K], summed whe
 cells (neither is meshed as a region). The insulator's single-face values are also kept as
 `insulator_face` / `insulator_R_area` / `insulator_rhocp_t` for reference. In shell mode the
 roll-to-can `wall_clearance` (filled with `cavity_fill`) also contributes `wall_clearance/k_fill`
-to every external face via the same dicts.
+to every external face via the same dicts. With a fixed can (`enclosure.outer_dims`) the mesh is the
+roll bbox and the void is per-face instead: electrolyte side clearances on the in-plane faces, a gas
+`headspace_fill` layer on the top face, and the insulator on the bottom (roll bottom-referenced,
+centred in-plane).
 
 ---
 

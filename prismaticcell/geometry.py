@@ -128,7 +128,10 @@ def _role_layer(layers, role):
 def build_geometry(cfg: SimConfig) -> Geometry:
     """Construct the full :class:`Geometry` from a validated ``SimConfig``."""
     wall_real = cfg.enclosure.wall_thickness
-    shell = cfg.enclosure.wall_model == "shell"
+    # A fixed can size (enclosure.outer_dims) meshes only the roll bbox and represents the wall +
+    # clearances + headspace as sub-grid layers, so it implies the shell wall model.
+    explicit = cfg.enclosure.outer_dims is not None
+    shell = (cfg.enclosure.wall_model == "shell") or explicit
     # In "shell" mode the wall is NOT meshed (it wraps the cavity as a sub-grid skin), so it
     # contributes no mesh thickness; in "mesh" mode it occupies volume cells at the box edge.
     wall = 0.0 if shell else wall_real
@@ -158,20 +161,46 @@ def build_geometry(cfg: SimConfig) -> Geometry:
     else:  # pragma: no cover - guarded by config Literal
         raise ValueError(f"unknown arrangement '{arrangement}'")
 
-    # Cavity extent per physical axis (rolls sum along the arrangement axis, else max)
-    cav = [0.0, 0.0, 0.0]
+    # Tight roll-assembly extent per axis (rolls sum along the arrangement axis, else max).
+    tight = [0.0, 0.0, 0.0]
     for ax in (0, 1, 2):
-        cav[ax] = (sum(size[ax]) + gap * (nr - 1) if ax == arr_axis else max(size[ax])) + 2 * clr
-    L = [cav[ax] + 2 * wall for ax in (0, 1, 2)]
+        tight[ax] = (sum(size[ax]) + gap * (nr - 1)) if ax == arr_axis else max(size[ax])
+
+    # Insulator thickness (bottom slab) -- referenced here so the roll can sit on it.
+    ins_cfg = cfg.enclosure.insulator
+    t_ins_val = ins_cfg.thickness if ins_cfg is not None else 0.0
+
+    outer = cfg.enclosure.outer_dims
+    if explicit:
+        # Fixed can: mesh only the roll-assembly bbox; wall / clearances / headspace / insulator are
+        # all sub-grid layers. Inner cavity = outer - 2*wall. Roll is bottom-referenced along the
+        # height axis (sits on the insulator) and centred in the two in-plane axes.
+        inner = [outer[ax] - 2.0 * wall_real for ax in (0, 1, 2)]
+        for ax in (0, 1, 2):
+            slack = inner[ax] - tight[ax] - (t_ins_val if ax == ha else 0.0)
+            if slack < -1e-12:
+                raise ValueError(
+                    f"enclosure.outer_dims too small along axis {ax}: inner cavity "
+                    f"{inner[ax]*1e3:.2f} mm < roll {tight[ax]*1e3:.2f} mm"
+                    + (f" + insulator {t_ins_val*1e3:.2f} mm" if ax == ha else "")
+                    + ". Increase outer_dims or reduce the roll/insulator.")
+        cav = list(tight)
+        L = list(tight)                       # meshed domain = roll bbox (wall is sub-grid)
+        roll_lo = [0.0, 0.0, 0.0]
+    else:
+        inner = None
+        cav = [tight[ax] + 2.0 * clr for ax in (0, 1, 2)]
+        L = [cav[ax] + 2.0 * wall for ax in (0, 1, 2)]
+        roll_lo = [wall + clr, wall + clr, wall + clr]
     Lx, Ly, Lz = L
 
     # Roll bounding boxes (lo,hi) per physical axis
     bboxes: List[List[Tuple[float, float]]] = []
-    cursor = wall + clr
+    cursor = roll_lo[arr_axis]
     for r in range(nr):
         box = [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
         for ax in (0, 1, 2):
-            lo = cursor if ax == arr_axis else wall + clr
+            lo = cursor if ax == arr_axis else roll_lo[ax]
             box[ax] = (lo, lo + size[ax][r])
         cursor = box[arr_axis][1] + gap
         bboxes.append(box)
@@ -382,7 +411,24 @@ def build_geometry(cfg: SimConfig) -> Geometry:
     # to those cells -- this is what makes the fill choice (air k=0.03 vs electrolyte k=0.6) actually
     # change roll<->can heat transfer, independent of mesh. The internal inter-roll gap is left to
     # the meshed gap cells (resolved only on a fine enough grid).
-    if shell and clr > 0.0 and gap_mat.k_through > 0.0:
+    if explicit:
+        # Fixed-can void as sub-grid layers: electrolyte side clearances (centred, spanning the
+        # roll height) on the two in-plane faces of each in-plane axis, and a gas headspace on the
+        # top face. The bottom insulator is already added above; the roll sits on it.
+        for ax in (la, sa):
+            side = max((inner[ax] - tight[ax]) / 2.0, 0.0)     # symmetric clearance, each side
+            if side > 0.0 and gap_mat.k_through > 0.0:
+                r_side = side / gap_mat.k_through
+                m_side = gap_mat.density * gap_mat.cp * side
+                for face in _face_names[ax]:
+                    _add_face_layer(face, r_side, m_side)
+        headspace = max(inner[ha] - t_ins_val - tight[ha], 0.0)   # all leftover height is on top
+        if headspace > 0.0:
+            hs_mat = cfg.materials[cfg.enclosure.headspace_fill]
+            if hs_mat.k_through > 0.0:
+                _add_face_layer(_face_names[ha][1], headspace / hs_mat.k_through,
+                                hs_mat.density * hs_mat.cp * headspace)
+    elif shell and clr > 0.0 and gap_mat.k_through > 0.0:
         r_clr = clr / gap_mat.k_through
         m_clr = gap_mat.density * gap_mat.cp * clr
         for ax in (0, 1, 2):
@@ -398,7 +444,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         cell_roll=cell_roll,
         cap_cv=cap_cv,
         rolls=rolls,
-        outer_dims=(Lx, Ly, Lz),
+        outer_dims=(tuple(outer) if explicit else (Lx, Ly, Lz)),
         contact_conductance=cfg.enclosure.contact_conductance,
         g_tab_pos=g_tab_pos, g_tab_neg=g_tab_neg,
         tab_heat_cond_pos=tab_heat_pos, tab_heat_cond_neg=tab_heat_neg,

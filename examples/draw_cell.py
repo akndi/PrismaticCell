@@ -58,6 +58,17 @@ def _cfg_info(path):
     info["Ly_true"] = sum(n * st for n, _, st in info["rolls"]) + info["inter_gap"] * (len(rolls) - 1)
     w = cfg.assembly.roll_wrap
     info["wrap"] = (w.thickness, w.coverage) if w is not None else None
+    info["cavity_fill"] = cfg.assembly.cavity_fill
+    od = cfg.enclosure.outer_dims
+    info["outer_dims"] = list(od) if od is not None else None   # [x,y,z] can outer size, m
+    info["wall"] = cfg.enclosure.wall_thickness
+    if od is not None:
+        wall = cfg.enclosure.wall_thickness
+        info["headspace"] = max((od[2] - 2 * wall) - info["t_ins"] - info["Lz"], 0.0)  # Z leftover
+        info["side_len"] = max(((od[0] - 2 * wall) - info["Lx"]) / 2.0, 0.0)            # X clearance
+    else:
+        info["headspace"] = 0.0
+        info["side_len"] = 0.0
     return info
 
 
@@ -122,10 +133,9 @@ def _box3d_internal(info, ax):
     ax.view_init(elev=20, azim=-58)
     ntot = sum(n for n, _, _ in info["rolls"])
     rolls_txt = " + ".join(f"{n}" for n, _, _ in info["rolls"])
-    ax.set_title(f"3-D cutaway: {ntot} stacks ({rolls_txt}) × 5 layers "
-                 f"(Cathode-CC|Cathode|Sep|Anode|Anode-CC)\n"
-                 f"inter-roll gap {info['inter_gap']*1e3:.1f} mm   ·   "
-                 f"bottom insulator {info['t_ins']*1e3:.2f} mm", fontsize=10)
+    ax.set_title(f"{ntot} stacks ({rolls_txt}) × 5 layers, "
+                 f"inter-roll gap {info['inter_gap']*1e3:.1f} mm, insulator {info['t_ins']*1e3:.2f} mm",
+                 fontsize=9, y=0.98)
 
 
 def _zoom3d(info, ax, n_show=6):
@@ -152,28 +162,68 @@ def _zoom3d(info, ax, n_show=6):
     ax.view_init(elev=16, azim=-62)
 
 
+ELY = "#7fb2e5"    # electrolyte (light blue)
+GAS = "#e5e7ea"    # gas headspace (light grey)
+
+
+def _elevation_can(info, ax):
+    """Side elevation (X-Z, not to scale): fixed can with insulator, roll, electrolyte side
+    clearances (up to the roll top) and the gas headspace above."""
+    if info["outer_dims"] is None:
+        ax.axis("off"); ax.set_title("(auto-sized cavity: no fixed can)", fontsize=9); return
+    # schematic band fractions (exaggerated so thin features are visible)
+    wallf, insf, hsf = 0.05, 0.07, 0.22
+    rollf = 1.0 - insf - hsf
+    sidef = 0.10                                     # electrolyte side clearance (each side)
+    x0, x1 = sidef, 1.0 - sidef
+    # can wall outline
+    ax.add_patch(Rectangle((-wallf, -wallf), 1 + 2 * wallf, 1 + 2 * wallf, facecolor="none",
+                           ec="k", lw=2.5))
+    ax.add_patch(Rectangle((0, insf + rollf), 1, hsf, facecolor=GAS, ec="k", lw=0.6))      # headspace
+    ax.add_patch(Rectangle((x0, insf), x1 - x0, rollf, facecolor=BLUE, ec="k", lw=1.0, alpha=0.5))  # roll
+    ax.add_patch(Rectangle((0, insf), sidef, rollf, facecolor=ELY, ec="k", lw=0.5))        # L clearance
+    ax.add_patch(Rectangle((1 - sidef, insf), sidef, rollf, facecolor=ELY, ec="k", lw=0.5))  # R clearance
+    ax.add_patch(Rectangle((0, 0), 1, insf, facecolor=GREEN, ec="k", lw=0.8))              # insulator
+    ax.plot([0, 1], [insf + rollf, insf + rollf], color="#1f6fb2", lw=1.2, ls="--")        # elyte level
+    ax.text(0.5, insf + rollf + hsf / 2, f"gas headspace\n{info['headspace']*1e3:.1f} mm",
+            ha="center", va="center", fontsize=8, color="#444")
+    ax.text(0.5, insf + rollf / 2, "jellyrolls", ha="center", va="center", fontsize=9,
+            color="#12325a", fontweight="bold")
+    ax.text(sidef / 2, insf + rollf * 0.5, "elyte", ha="center", va="center", fontsize=6,
+            color="#1f6fb2", rotation=90)
+    ax.text(0.5, insf / 2, "insulator", ha="center", va="center", fontsize=7, color="#0f4d22")
+    ax.text(0.99, insf + rollf, "electrolyte level = roll top", ha="right", va="bottom",
+            fontsize=7, color="#1f6fb2")
+    ax.set_xlim(-0.12, 1.12); ax.set_ylim(-0.12, 1.12); ax.set_aspect("equal"); ax.axis("off")
+    od = info["outer_dims"]
+    ax.set_title(f"side elevation X–Z (not to scale)\nfixed can {od[0]*1e3:.0f}×{od[2]*1e3:.0f} mm, "
+                 f"wall {info['wall']*1e3:.1f} mm", fontsize=9)
+
+
 def _topview(info, ax):
-    """Top view (X-Y, looking down the height Z): the two jellyrolls with the mylar wrap border."""
+    """Top view (X-Y, looking down Z): jellyrolls, mylar wrap border, and (fixed can) the
+    electrolyte side clearance out to the can wall."""
     Lx, Ly, gap = info["Lx"], info["Ly_true"], info["inter_gap"]
+    sx = info["side_len"] if info["outer_dims"] else 0.0     # X clearance to draw
+    if info["outer_dims"]:                                   # electrolyte-filled cavity + can wall
+        ax.add_patch(Rectangle((-sx, -sx), Lx + 2 * sx, Ly + 2 * sx, facecolor=ELY, ec="k", lw=2.0))
     y = 0.0
     for ri, (n, _l, st) in enumerate(info["rolls"]):
         rw = n * st
-        ax.add_patch(Rectangle((0, y), Lx, rw, facecolor=BLUE, ec="none", alpha=0.30))
-        if info["wrap"] is not None:
-            # mylar wrap = a border around the roll's side faces (top/bottom height ends open)
-            ax.add_patch(Rectangle((0, y), Lx, rw, facecolor="none", ec=MYLAR, lw=3.0))
-        else:
-            ax.add_patch(Rectangle((0, y), Lx, rw, facecolor="none", ec="k", lw=1.0))
+        ax.add_patch(Rectangle((0, y), Lx, rw, facecolor=BLUE, ec="none", alpha=0.35))
+        ec, lw = (MYLAR, 3.0) if info["wrap"] is not None else ("k", 1.0)
+        ax.add_patch(Rectangle((0, y), Lx, rw, facecolor="none", ec=ec, lw=lw))
         ax.text(Lx / 2, y + rw / 2, f"jellyroll {ri+1}", ha="center", va="center",
                 fontsize=8, color="#12325a")
         y += rw
         if ri < len(info["rolls"]) - 1:
-            ax.add_patch(Rectangle((0, y), Lx, gap, facecolor=GREY, ec="none", alpha=0.6))
+            ax.add_patch(Rectangle((0, y), Lx, gap, facecolor=ELY, ec="none"))
             y += gap
-    ax.set_xlim(-0.04 * Lx, 1.04 * Lx); ax.set_ylim(-0.10 * Ly, y + 0.10 * Ly)
-    ax.set_aspect(Lx / max(y, 1e-9) * 0.5)
-    wtxt = f"mylar wrap {info['wrap'][0]*1e6:.0f} µm" if info["wrap"] else "no wrap"
-    ax.set_title(f"top view X–Y: {wtxt} on roll sides (purple)", fontsize=9)
+    m = max(sx, 0.06 * Ly)
+    ax.set_xlim(-sx - 0.04 * Lx, Lx + sx + 0.04 * Lx); ax.set_ylim(-m, y + m)
+    ax.set_aspect(Lx / max(y + 2 * m, 1e-9) * 0.6)
+    fill = info["cavity_fill"] if info["outer_dims"] else "—"
+    ax.set_title(f"top view X–Y: wrap (purple), cavity = {fill}", fontsize=9)
     ax.set_xlabel("X = length"); ax.set_ylabel("Y = thickness")
     ax.set_xticks([]); ax.set_yticks([])
 
@@ -204,13 +254,15 @@ def _sandwich(info, ax):
 
 def draw(info, out="outputs/cell_internal_3d.png"):
     fig = plt.figure(figsize=(16, 8.5))
-    axA = fig.add_axes([0.00, 0.04, 0.58, 0.88], projection="3d")     # main 3-D, all stacks
-    axZ = fig.add_axes([0.60, 0.55, 0.22, 0.38], projection="3d")     # 3-D zoom, few stacks
-    axD = fig.add_axes([0.60, 0.36, 0.34, 0.15])                      # sandwich detail (to scale)
-    axT = fig.add_axes([0.63, 0.13, 0.28, 0.16])                      # top view (wrap)
+    axA = fig.add_axes([0.00, 0.05, 0.50, 0.88], projection="3d")     # main 3-D, all stacks
+    axZ = fig.add_axes([0.52, 0.60, 0.22, 0.34], projection="3d")     # 3-D zoom, few stacks
+    axD = fig.add_axes([0.52, 0.44, 0.34, 0.13])                      # sandwich detail (to scale)
+    axE = fig.add_axes([0.52, 0.09, 0.20, 0.28])                      # side elevation (can/headspace)
+    axT = fig.add_axes([0.76, 0.09, 0.22, 0.28])                      # top view (wrap/clearance)
     _box3d_internal(info, axA)
     _zoom3d(info, axZ)
     _sandwich(info, axD)
+    _elevation_can(info, axE)
     _topview(info, axT)
     handles = [Line2D([0], [0], marker="s", color="w", markerfacecolor=ROLE_COL[r],
                       markeredgecolor="k", markersize=12, label=ROLE_LABEL[r]) for r in ROLE_ORDER]

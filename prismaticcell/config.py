@@ -186,6 +186,14 @@ class Enclosure:
     #    on the grid. Correct for thin walls in large faces (no >100-cell requirement).
     #  - "mesh": the wall is meshed as volume cells (only resolved where dx/dy/dz < wall_thickness).
     wall_model: Literal["shell", "mesh"] = "shell"
+    # Fixed can OUTER dimensions [Lx, Ly, Lz] in metres. When given, the can size is fixed (not
+    # auto-sized to hug the roll): inner cavity = outer - 2*wall_thickness, the roll sits on the
+    # bottom insulator (bottom-referenced in height) and is centred in the two in-plane axes, the
+    # side clearances are filled with `assembly.cavity_fill` up to the roll top, and the leftover
+    # space above the roll is the gas headspace. When None, the cavity is auto-sized (roll + uniform
+    # `assembly.wall_clearance`).
+    outer_dims: Optional[List[float]] = None
+    headspace_fill: str = "gap_air"   # gas filling the headspace above the roll (electrolyte level)
 
 
 # --------------------------------------------------------------------------- #
@@ -450,6 +458,13 @@ class SimConfig:
                 errors.append(f"tab {t.polarity} size_length/size_height must be > 0")
         if self.enclosure.material not in known:
             errors.append(f"enclosure references unknown material '{self.enclosure.material}'")
+        od = self.enclosure.outer_dims
+        if od is not None:
+            if len(od) != 3 or any(v <= 0 for v in od):
+                errors.append("enclosure.outer_dims must be 3 positive values [Lx, Ly, Lz]")
+            if self.enclosure.headspace_fill not in known:
+                errors.append(f"enclosure.headspace_fill references unknown material "
+                              f"'{self.enclosure.headspace_fill}'")
         ins = self.enclosure.insulator
         if ins is not None:
             if ins.material not in known:
