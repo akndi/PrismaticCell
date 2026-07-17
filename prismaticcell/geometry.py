@@ -114,6 +114,9 @@ class Geometry:
     # the roll footprint; thermal.py multiplies each face's ambient conductance by this. 1.0 when
     # not fixed-can (the cavity boundary already is the external surface).
     face_area_scale: Dict[str, float] = field(default_factory=dict)
+    # Out-of-cell tab protrusion length per polarity [m] (max over that polarity's tabs) — used by
+    # viz to draw the physical tab sticking out beyond the electrode edge.
+    tab_protrusion: Dict[str, float] = field(default_factory=dict)
 
     @property
     def n_active(self) -> int:
@@ -393,6 +396,9 @@ def build_geometry(cfg: SimConfig) -> Geometry:
             tab_heat_neg += mat.k_in * xsec / Lp
     if not cfg.enclosure.tab_heat_sink:
         tab_heat_pos = tab_heat_neg = 0.0   # tabs thermally isolated (no far-end heat sink)
+    tab_protrusion: Dict[str, float] = {}
+    for tab in cfg.tabs:
+        tab_protrusion[tab.polarity] = max(tab_protrusion.get(tab.polarity, 0.0), tab.protrusion)
 
     # Capacity per CV proportional to effective electrode area; normalized to exact total
     cap_cv = np.zeros((nx, ny, nz))
@@ -506,6 +512,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         face_R_area=face_R_area, face_rhocp_t=face_rhocp_t,
         inter_roll_R_area=inter_roll_R_area, inter_roll_rhocp_t=inter_roll_rhocp_t,
         face_area_scale=face_area_scale,
+        tab_protrusion=tab_protrusion,
     )
 
 

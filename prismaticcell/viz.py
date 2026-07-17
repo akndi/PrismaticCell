@@ -193,7 +193,7 @@ def plot_temperature_slice(result, k_index: Optional[int] = None, path: Optional
     ax.plot(xhot, yhot, marker="x", markersize=12, markeredgewidth=2.5,
             color="cyan", label=f"hotspot {thot:.2f} °C")
 
-    _overlay_tabs(geom, tfield, ax)
+    _overlay_tabs(geom, tfield, ax, im, dict(getattr(result, "p_tab_final", {}) or {}))
     ax.legend(loc="upper right", fontsize=8)
 
     ax.set_xlabel(f"length ({_AXNAME[la]}) [mm]")
@@ -203,12 +203,15 @@ def plot_temperature_slice(result, k_index: Optional[int] = None, path: Optional
     return _save(fig, path)
 
 
-def _overlay_tabs(geom, tfield, ax):
-    """Outline each tab's weld footprint on the electrode plane, labelled with its SOLVED root
-    temperature (mean of the attachment CVs — includes the tab Joule backflow).
+def _overlay_tabs(geom, tfield, ax, im=None, p_tab=None):
+    """Draw each tab on the electrode-plane heatmap: the weld footprint (dashed outline, INSIDE
+    the electrode — where the foils bundle and current enters) and the PHYSICAL tab protruding
+    beyond the nearest height edge, coloured by its 1-D fin temperature profile (root → heat-sunk
+    tip, including I²R self-heating) on the same colour scale as the heatmap.
 
-    The rectangle spans the actual attachment columns (the model's discrete footprint), extended
-    by half a cell so it covers the full weld cells.
+    All temperatures are solved/derived model quantities: the root is the mean of the attachment
+    CVs (includes the tab Joule backflow); the fin profile uses the exact solved tab dissipation
+    when available.
     """
     from .geometry import tab_attachment_cells
     from matplotlib.patches import Rectangle
@@ -217,6 +220,10 @@ def _overlay_tabs(geom, tfield, ax):
     _, la, ha = _axes(geom)
     d = (grid.dx, grid.dy, grid.dz)
     hw, hh = d[la] * 1e3 / 2.0, d[ha] * 1e3 / 2.0
+    p_tab = p_tab or {}
+    t_sink = _tab_sink_temp(None, geom, tfield)
+    y_lo, y_hi = ax.get_ylim()
+    prot_max_mm = 0.0
     style = {"pos": ("#ff5533", "+ tab"), "neg": ("#40c4ff", "− tab")}
     for pol, (color, name) in style.items():
         cells = tab_attachment_cells(geom, pol)
@@ -225,21 +232,49 @@ def _overlay_tabs(geom, tfield, ax):
         pts = sorted({(c[la], c[ha]) for c in cells})       # electrode-plane columns of the weld
         xy = [_cell_center_mm(geom, a, b) for (a, b) in pts]
         xs, ys = zip(*xy)
-        rect = Rectangle((min(xs) - hw, min(ys) - hh),
-                         (max(xs) - min(xs)) + 2 * hw, (max(ys) - min(ys)) + 2 * hh,
-                         fill=False, edgecolor=color, linewidth=2.2, zorder=6)
-        ax.add_patch(rect)
-        t_root = _k_to_c(_tab_root_temp(geom, tfield, pol))
-        # label below the footprint when it hugs the top edge of the plane, else above
-        y_lo, y_hi = ax.get_ylim()
-        near_top = (max(ys) + hh) > y_lo + 0.85 * (y_hi - y_lo)
-        xy = (0.5 * (min(xs) + max(xs)), (min(ys) - hh) if near_top else (max(ys) + hh))
-        ax.annotate(f"{name}  {t_root:.2f} °C", xy=xy,
-                    xytext=(0, -6 if near_top else 6), textcoords="offset points",
-                    ha="center", va="top" if near_top else "bottom",
+        x0, x1 = min(xs) - hw, max(xs) + hw
+        y0, y1 = min(ys) - hh, max(ys) + hh
+        # weld footprint: dashed outline INSIDE the electrode (the foil-bundling zone)
+        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor=color,
+                               linewidth=1.6, linestyle="--", zorder=6))
+        t_root = _tab_root_temp(geom, tfield, pol)
+
+        # physical tab: protrudes beyond the NEAREST height edge, coloured by the fin profile
+        prot_mm = float(getattr(geom, "tab_protrusion", {}).get(pol, 0.0)) * 1e3
+        up = 0.5 * (y0 + y1) > 0.5 * (y_lo + y_hi)          # upper half -> protrude past the top
+        gcond = float(getattr(geom, "tab_heat_cond_pos" if pol == "pos" else "tab_heat_cond_neg", 0.0))
+        p_w = float(p_tab.get(pol, 0.0))
+        if prot_mm > 0.0:
+            base = y1 if up else y0
+            sgn = 1.0 if up else -1.0
+            nseg = 24
+            for s in range(nseg):
+                xi0, xi1 = s / nseg, (s + 1) / nseg
+                xi_m = 0.5 * (xi0 + xi1)
+                if gcond > 0.0:                              # fin: root -> sink with I²R bump
+                    t_seg = (t_root + (t_sink - t_root) * xi_m
+                             + (p_w / (2.0 * gcond)) * xi_m * (1.0 - xi_m))
+                else:                                        # not heat-sunk: isothermal at root
+                    t_seg = t_root
+                fc = im.cmap(im.norm(_k_to_c(t_seg))) if im is not None else color
+                ax.add_patch(Rectangle((x0, base + sgn * xi0 * prot_mm),
+                                       x1 - x0, sgn * (xi1 - xi0) * prot_mm,
+                                       facecolor=fc, edgecolor="none", zorder=6, clip_on=False))
+            ax.add_patch(Rectangle((x0, base), x1 - x0, sgn * prot_mm, fill=False,
+                                   edgecolor=color, linewidth=2.0, zorder=7, clip_on=False))
+            prot_max_mm = max(prot_max_mm, prot_mm)
+        # root label just inside the plane, on the far side of the weld footprint (away from
+        # the protrusion) so it never collides with the title above the plot
+        lbl_y, lbl_va, lbl_off = ((y0, "top", -6) if up else (y1, "bottom", 6))
+        ax.annotate(f"{name}  root {_k_to_c(t_root):.2f} °C",
+                    xy=(0.5 * (x0 + x1), lbl_y), xytext=(0, lbl_off),
+                    textcoords="offset points", ha="center", va=lbl_va,
                     fontsize=8, fontweight="bold", color=color,
                     bbox=dict(boxstyle="round,pad=0.2", fc="black", alpha=0.55, ec="none"),
-                    zorder=7)
+                    zorder=8)
+    if prot_max_mm > 0.0:                                    # make room for the protruding tabs
+        pad = 0.35 * prot_max_mm
+        ax.set_ylim(y_lo, y_hi + prot_max_mm + pad)
 
 
 # --------------------------------------------------------------------------- #
