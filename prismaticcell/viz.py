@@ -255,13 +255,11 @@ def _overlay_tabs(geom, tfield, ax, im=None, p_tab=None, polarities=("pos", "neg
         t_root = _tab_root_temp(geom, tfield, pol)
         prot_mm = float(getattr(geom, "tab_protrusion", {}).get(pol, 0.0)) * 1e3
 
-        # weld band: flush ON the electrode edge (a slim band just inside the boundary)
-        band = 0.03 * H_mm
-        ax.add_patch(Rectangle((x0, edge - (band if up else 0.0)), x1 - x0, band,
-                               facecolor=color, edgecolor="none", alpha=0.95, zorder=6))
-        # physical tab: stub outside the edge, PAINTED with its 1-D fin temperature profile on
-        # the heatmap's colour scale (the tab is a sub-grid fin, not meshed CVs — this analytic
-        # profile is its model temperature; values beyond the plane's range clip at the scale end)
+        # physical tab: the SAME metal as the collector continuing past the edge — drawn as a
+        # seamless extension PAINTED with its 1-D fin temperature profile on the heatmap's colour
+        # scale (the tab is a sub-grid fin, not meshed CVs — this analytic profile is its model
+        # temperature; values beyond the plane's range clip at the scale end). Only a hairline
+        # outline against the figure background; polarity is carried by the text label alone.
         if prot_mm > 0.0:
             gcond = float(getattr(geom, f"tab_heat_cond_{pol}", 0.0))
             gfin = float(getattr(geom, f"tab_fin_cond_{pol}", 0.0)) or gcond
@@ -281,13 +279,16 @@ def _overlay_tabs(geom, tfield, ax, im=None, p_tab=None, polarities=("pos", "neg
                 ax.add_patch(Rectangle((x0, edge + sgn * (s / nseg) * prot_mm),
                                        x1 - x0, sgn * prot_mm / nseg,
                                        facecolor=fc, edgecolor="none", zorder=6, clip_on=False))
-            ax.add_patch(Rectangle((x0, edge), x1 - x0, sgn * prot_mm,
-                                   fill=False, edgecolor=color, linewidth=1.8,
-                                   zorder=7, clip_on=False))
+            # hairline silhouette on the three exposed sides only (the base stays open so the
+            # metal reads as continuous with the electrode)
+            tip = edge + sgn * prot_mm
+            ax.plot([x0, x0, x1, x1], [edge, tip, tip, edge], color="#888888",
+                    linewidth=0.7, zorder=7, clip_on=False, solid_capstyle="butt")
             prot_max_mm = max(prot_max_mm, prot_mm)
-        # label beside the stub, outside the plane (neutral ink; the colored stub carries identity)
+        # label beside the stub, outside the plane (neutral ink carries the polarity)
+        lbl_h = prot_mm if prot_mm > 0.0 else 0.03 * H_mm
         ax.annotate(f"{name}   root {_k_to_c(t_root):.1f} °C",
-                    xy=(x1 + 0.006 * max(x1, 1.0), edge + sgn * 0.5 * max(prot_mm, band)),
+                    xy=(x1 + 0.006 * max(x1, 1.0), edge + sgn * 0.5 * lbl_h),
                     xytext=(6, 0), textcoords="offset points",
                     ha="left", va="center", fontsize=8.5, color="#333333",
                     annotation_clip=False, zorder=8)
