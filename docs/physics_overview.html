@@ -1,0 +1,310 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrismaticCell — Model Physics</title>
+<style>
+  :root {
+    --ground: #F7F8FA; --surface: #FFFFFF; --ink: #1E242B; --muted: #5C6672;
+    --heat: #C75B1F; --volt: #2F6DA3; --line: #DCE1E8; --chip-ink: #FFFFFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ground: #14181D; --surface: #1B2129; --ink: #E8EAED; --muted: #98A2AE;
+            --heat: #E98A4E; --volt: #74A9D8; --line: #2A323C; --chip-ink: #14181D; }
+  }
+  :root[data-theme="dark"] { --ground: #14181D; --surface: #1B2129; --ink: #E8EAED;
+    --muted: #98A2AE; --heat: #E98A4E; --volt: #74A9D8; --line: #2A323C; --chip-ink: #14181D; }
+  :root[data-theme="light"] { --ground: #F7F8FA; --surface: #FFFFFF; --ink: #1E242B;
+    --muted: #5C6672; --heat: #C75B1F; --volt: #2F6DA3; --line: #DCE1E8; --chip-ink: #FFFFFF; }
+
+  html { background: var(--ground); }
+  body { margin: 0; color: var(--ink);
+         font: 16px/1.62 Charter, "Bitstream Charter", Cambria, Georgia, serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  h1, h2, h3, .eyebrow, nav, .chip {
+    font-family: system-ui, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  h1 { font-size: 34px; line-height: 1.15; font-weight: 750; letter-spacing: -0.015em;
+       margin: 8px 0 10px; text-wrap: balance; }
+  .subtitle { color: var(--muted); font-size: 17px; margin: 0 0 8px; }
+  h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 4px; }
+  h3 { font-size: 16.5px; font-weight: 650; margin: 22px 0 6px; }
+  p  { margin: 10px 0; }
+  .kicker { text-transform: uppercase; letter-spacing: 0.14em; font-size: 12px;
+            font-weight: 650; color: var(--muted);
+            font-family: system-ui, "Segoe UI", sans-serif; }
+
+  header { border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 10px; }
+  .meta { color: var(--muted); font-size: 14px;
+          font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  nav { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 18px 0 6px;
+        font-size: 13.5px; }
+  nav a { color: var(--muted); text-decoration: none; }
+  nav a:hover, nav a:focus-visible { color: var(--ink); text-decoration: underline; }
+  a:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+
+  section { margin-top: 46px; }
+  .eyebrow { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
+  .secnum { font-size: 13px; font-weight: 700; color: var(--muted);
+            font-variant-numeric: tabular-nums; }
+  .chip { font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em;
+          padding: 2px 8px 1px; border-radius: 2px; color: var(--chip-ink); }
+  .chip.th { background: var(--heat); }
+  .chip.el { background: var(--volt); }
+  .chip.co { background: linear-gradient(100deg, var(--volt) 0 49%, var(--heat) 51% 100%); }
+
+  .eq { background: var(--surface); border: 1px solid var(--line);
+        padding: 14px 18px; margin: 14px 0; display: flex;
+        justify-content: space-between; align-items: center; gap: 16px;
+        overflow-x: auto; }
+  .eq .m { font-size: 18px; white-space: nowrap; }
+  .eq .tag { color: var(--muted); font-size: 12.5px; flex: none;
+             font-family: ui-monospace, Menlo, Consolas, monospace; }
+  var { font-style: italic; font-family: inherit; }
+  sub, sup { font-size: 71%; line-height: 0; }
+  .frac { display: inline-flex; flex-direction: column; align-items: center;
+          vertical-align: -0.9em; margin: 0 2px; line-height: 1.15; }
+  .frac > span { padding: 0 4px; font-size: 92%; }
+  .frac > span:first-child { border-bottom: 1px solid currentColor; }
+  .where { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px;
+           font-size: 14.2px; color: var(--muted); margin: 8px 0 0 4px; }
+  .where b { color: var(--ink); font-weight: 500; font-style: italic;
+             font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14.5px; }
+  th { text-align: left; font-family: system-ui, "Segoe UI", sans-serif;
+       font-size: 12.5px; letter-spacing: 0.05em; text-transform: uppercase;
+       color: var(--muted); font-weight: 650; padding: 6px 12px 6px 0;
+       border-bottom: 1px solid var(--line); }
+  td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--line);
+       vertical-align: top; }
+  td:first-child { white-space: nowrap; }
+
+  code { font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+         background: var(--surface); border: 1px solid var(--line);
+         padding: 1px 5px; border-radius: 3px; }
+  .note { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px;
+          color: var(--muted); font-size: 14.5px; }
+  ul { padding-left: 22px; margin: 8px 0; }
+  li { margin: 4px 0; }
+
+  @media print {
+    html { background: #fff; }
+    body { font-size: 12.5px; }
+    section { break-inside: avoid-page; margin-top: 28px; }
+    nav { display: none; }
+  }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="kicker">PrismaticCell · model reference</div>
+  <h1>Physics of the distributed electro-thermal cell model</h1>
+  <p class="subtitle">A prismatic LFP cell as a network of coupled equivalent circuits inside a
+  3-D thermal solid — every control volume carries its own electrochemical state, and heat and
+  electricity feed back on each other every step.</p>
+  <p class="meta">LFP / graphite · one ECM per control volume · energy-conserving to ~10⁻¹²</p>
+  <nav aria-label="sections">
+    <a href="#s1">1 Geometry</a><a href="#s2">2 ECM</a><a href="#s3">3 Collector network</a>
+    <a href="#s4">4 Heat generation</a><a href="#s5">5 Thermal solver</a>
+    <a href="#s6">6 Sub-grid layers</a><a href="#s7">7 Coupling loop</a>
+    <a href="#s8">8 Conservation</a>
+  </nav>
+</header>
+
+<section id="s1">
+  <div class="eyebrow"><span class="secnum">1</span><span class="chip th">THERMAL</span></div>
+  <h2>Geometry &amp; homogenization</h2>
+  <p>The cell is a fixed metal can holding two jellyrolls; each jellyroll is a stack of
+  five-layer sandwiches — cathode collector (Al) | cathode (LFP) | separator | anode (graphite) |
+  anode collector (Cu). The domain is a structured control-volume grid; each active CV is a
+  homogenized piece of the sandwich stack with <em>anisotropic</em> conductivity: series
+  (harmonic) through the layers, parallel (thickness-weighted) along the foils.</p>
+  <div class="eq"><span class="m">
+    <var>k</var><sub>⊥</sub> =
+    <span class="frac"><span>Σ <var>t</var><sub>i</sub></span><span>Σ <var>t</var><sub>i</sub>/<var>k</var><sub>i</sub></span></span>
+    &nbsp;&nbsp;&nbsp;
+    <var>k</var><sub>∥</sub> =
+    <span class="frac"><span>Σ <var>t</var><sub>i</sub><var>k</var><sub>i</sub></span><span>Σ <var>t</var><sub>i</sub></span></span>
+    &nbsp;&nbsp;&nbsp;
+    (<var>ρc</var><sub>p</sub>)<sub>eff</sub> =
+    <span class="frac"><span>Σ <var>t</var><sub>i</sub><var>ρ</var><sub>i</sub><var>c</var><sub>i</sub></span><span>Σ <var>t</var><sub>i</sub></span></span>
+  </span><span class="tag">(1)</span></div>
+  <p>Through-plane conductivity lands ~20–60× below in-plane — the physical reason heat leaves
+  a prismatic cell far more easily along the foils than across the stack. All properties come
+  from the material database; nothing is baked into solver code.</p>
+</section>
+
+<section id="s2">
+  <div class="eyebrow"><span class="secnum">2</span><span class="chip el">ELECTRICAL</span></div>
+  <h2>One equivalent circuit per control volume</h2>
+  <p>Every active CV runs its own Thévenin model at its <em>local</em> state of charge and
+  <em>local</em> temperature: open-circuit voltage, an ohmic resistance, and RC pairs for
+  charge-transfer/diffusion dynamics.</p>
+  <div class="eq"><span class="m">
+    <var>v</var><sub>k</sub> = <var>U</var><sub>ocv</sub>(<var>z</var><sub>k</sub>)
+    − <var>j</var><sub>k</sub><var>R</var><sub>0</sub>(<var>z</var><sub>k</sub>,<var>T</var><sub>k</sub>)
+    − Σ<sub>p</sub> <var>u</var><sub>p,k</sub>
+  </span><span class="tag">(2)</span></div>
+  <div class="eq"><span class="m">
+    <span class="frac"><span>d<var>u</var><sub>p</sub></span><span>d<var>t</var></span></span> =
+    − <span class="frac"><span><var>u</var><sub>p</sub></span><span><var>R</var><sub>p</sub><var>C</var><sub>p</sub></span></span>
+    + <span class="frac"><span><var>j</var></span><span><var>C</var><sub>p</sub></span></span>
+    &nbsp;&nbsp;&nbsp;&nbsp;
+    <span class="frac"><span>d<var>z</var><sub>k</sub></span><span>d<var>t</var></span></span> =
+    − <span class="frac"><span><var>i</var><sub>k</sub></span><span>3600 · <var>Q</var><sub>k</sub></span></span>
+  </span><span class="tag">(3)</span></div>
+  <p>All parameters are SOC-dependent lookup tables with Arrhenius temperature scaling — this is
+  one leg of the two-way coupling:</p>
+  <div class="eq"><span class="m">
+    <var>X</var>(<var>T</var>) = <var>X</var><sub>ref</sub> ·
+    exp<span style="font-size:120%">[</span>
+    <span class="frac"><span><var>E</var><sub>a</sub></span><span><var>R</var></span></span>
+    <span style="font-size:120%">(</span>
+    <span class="frac"><span>1</span><span><var>T</var></span></span> −
+    <span class="frac"><span>1</span><span><var>T</var><sub>ref</sub></span></span>
+    <span style="font-size:120%">)]</span>
+  </span><span class="tag">(4)</span></div>
+  <div class="where">
+    <b>z<sub>k</sub></b><span>local state of charge (per CV — utilization is spatially resolved)</span>
+    <b>j<sub>k</sub>, i<sub>k</sub></b><span>areal current density / CV current (positive = discharge)</span>
+    <b>u<sub>p</sub></b><span>RC-pair overpotentials</span>
+    <b>Q<sub>k</sub></b><span>CV share of cell capacity</span>
+  </div>
+</section>
+
+<section id="s3">
+  <div class="eyebrow"><span class="secnum">3</span><span class="chip el">ELECTRICAL</span></div>
+  <h2>Current-collector network — why tab placement matters</h2>
+  <p>The CVs are not independent: they are wired through the Al and Cu foil potential fields.
+  Each foil obeys in-plane sheet-charge conservation, sourced by the local through-cell current
+  and terminated at the tab weld footprints:</p>
+  <div class="eq"><span class="m">
+    ∇·(<var>σt</var>&hairsp;∇<var>φ</var><sup>±</sup>) = ∓ <var>j</var>·<var>A</var><sub>cv</sub>
+  </span><span class="tag">(5)</span></div>
+  <div class="eq"><span class="m">
+    <var>φ</var><sup>+</sup><sub>k</sub> − <var>φ</var><sup>−</sup><sub>k</sub> = <var>v</var><sub>k</sub>
+    &nbsp;&nbsp;&nbsp;&nbsp; Σ<sub>k</sub> <var>i</var><sub>k</sub> = <var>I</var><sub>applied</sub>
+  </span><span class="tag">(6)</span></div>
+  <p>Local closure (6) couples the foils to every ECM; the terminal constraint fixes the total.
+  Tabs enter as physical conductances <var>G</var><sub>tab</sub> = <var>σ n</var><sub>foils</sub><var>w t</var>/<var>L</var>
+  distributed over the weld footprint, so tab position, size, and protrusion genuinely
+  redistribute current, SOC, and heat. Two fidelities: <code>planar</code> (one shared foil
+  potential per roll, 2.5-D) and <code>layered</code> (a foil potential per through-thickness
+  layer — full 3-D collector).</p>
+</section>
+
+<section id="s4">
+  <div class="eyebrow"><span class="secnum">4</span><span class="chip co">COUPLED</span></div>
+  <h2>Heat generation — the electrical→thermal leg</h2>
+  <p>Each CV deposits Bernardi heat: irreversible overpotential heat plus reversible entropic
+  heat (sign-changing for LFP, from the measured dU/dT table):</p>
+  <div class="eq"><span class="m">
+    <var>q</var><sub>k</sub> = <var>i</var><sub>k</sub>(<var>U</var><sub>ocv</sub> − <var>v</var><sub>k</sub>)
+    − <var>i</var><sub>k</sub><var>T</var><sub>k</sub>
+    <span class="frac"><span>d<var>U</var></span><span>d<var>T</var></span></span>
+  </span><span class="tag">(7)</span></div>
+  <p>Two more sources close the electrical ledger exactly:</p>
+  <div class="eq"><span class="m">
+    <var>q</var><sub>foil</sub> = <var>σt</var>&hairsp;|∇<var>φ</var>|<sup>2</sup>
+    &nbsp;&nbsp;&nbsp;&nbsp;
+    <var>P</var><sub>tab</sub> = Σ<sub>nodes</sub> <var>G</var><sub>n</sub>(<var>φ</var><sub>n</sub> − <var>V</var><sub>term</sub>)<sup>2</sup>
+  </span><span class="tag">(8)</span></div>
+  <p>The tab is a 1-D fin with uniform self-heating: <b>half of
+  <var>P</var><sub>tab</sub> returns through the weld</b> into the cell (all of it when the
+  terminal is not heat-sunk), the rest exits to the terminal. Its axial profile is analytic:</p>
+  <div class="eq"><span class="m">
+    <var>T</var>(<var>ξ</var>) = <var>T</var><sub>root</sub> +
+    (<var>T</var><sub>sink</sub> − <var>T</var><sub>root</sub>)<var>ξ</var> +
+    <span class="frac"><span><var>P</var><sub>tab</sub></span><span>2<var>G</var></span></span>
+    <var>ξ</var>(1−<var>ξ</var>)
+  </span><span class="tag">(9)</span></div>
+  <p class="note">The terminal boundary condition flips the near-tab signature: a coolant-sunk
+  busbar makes the welds the <em>coldest</em> spots on the foil; a floating terminal makes them
+  the <em>hottest</em>. Configurable as heat-sunk at coolant, heat-sunk at an explicit busbar
+  temperature, or adiabatic.</p>
+</section>
+
+<section id="s5">
+  <div class="eyebrow"><span class="secnum">5</span><span class="chip th">THERMAL</span></div>
+  <h2>3-D anisotropic thermal solver</h2>
+  <div class="eq"><span class="m">
+    <var>ρc</var><sub>p</sub>
+    <span class="frac"><span>∂<var>T</var></span><span>∂<var>t</var></span></span> =
+    ∇·(<b>k</b>&hairsp;∇<var>T</var>) + <var>q</var>‴
+  </span><span class="tag">(10)</span></div>
+  <p>Finite-volume on the structured grid; face conductances are harmonic means of the two
+  cells' directional conductivities (exact for series composites). Time integration is backward
+  Euler — unconditionally stable, with the factorization cached and reused across steps:</p>
+  <div class="eq"><span class="m">
+    (<var>M</var>/Δ<var>t</var> + <var>A</var>)&hairsp;<var>T</var><sup>n+1</sup> =
+    (<var>M</var>/Δ<var>t</var>)&hairsp;<var>T</var><sup>n</sup> + <var>b</var><sub>bc</sub> + <var>q</var>‴<var>V</var>
+  </span><span class="tag">(11)</span></div>
+  <h3>Boundary conditions — independent per face</h3>
+  <table>
+    <tr><th>Kind</th><th>Surface law</th><th>Typical use</th></tr>
+    <tr><td>Convection</td><td><var>q</var>″ = <var>h</var>(<var>T</var><sub>s</sub> − <var>T</var><sub>∞</sub>)</td><td>cold plate / air on any face</td></tr>
+    <tr><td>Dirichlet</td><td><var>T</var><sub>s</sub> = <var>T</var><sub>wall</sub></td><td>ideal chiller contact</td></tr>
+    <tr><td>Neumann</td><td><var>q</var>″ prescribed</td><td>heater or fixed extraction</td></tr>
+    <tr><td>Radiation</td><td><var>h</var><sub>rad</sub> = 4<var>εσ</var><sub>SB</sub><var>T</var><sub>m</sub><sup>3</sup></td><td>added to any face, linearized about film temperature</td></tr>
+    <tr><td>Adiabatic</td><td><var>q</var>″ = 0</td><td>insulated face</td></tr>
+  </table>
+</section>
+
+<section id="s6">
+  <div class="eyebrow"><span class="secnum">6</span><span class="chip th">THERMAL</span></div>
+  <h2>Sub-grid layers — thin features without a micro-mesh</h2>
+  <p>Real construction layers are far thinner than any practical mesh cell. Each is modeled as a
+  series thermal resistance (plus its heat capacity) on the exact heat path it interrupts —
+  mesh-independent by construction:</p>
+  <div class="eq"><span class="m">
+    <var>R</var>″ = <span class="frac"><span><var>t</var></span><span><var>k</var></span></span>
+    &nbsp;&nbsp;(per layer, summed in series where layers coincide)
+  </span><span class="tag">(12)</span></div>
+  <table>
+    <tr><th>Layer</th><th>Where it acts</th></tr>
+    <tr><td>Can wall (shell)</td><td>every external face: in-plane spreading + through-wall R + wall mass</td></tr>
+    <tr><td>Contact conductance</td><td>roll ↔ wall interface, 1/<var>h</var><sub>c</sub> in series</td></tr>
+    <tr><td>Bottom insulator (PP)</td><td>can floor — the roll rests on it</td></tr>
+    <tr><td>Mylar wrap (PET)</td><td>the roll's wrapped side faces</td></tr>
+    <tr><td>Electrolyte clearance</td><td>side gaps, filled to the roll top (flooded cell)</td></tr>
+    <tr><td>Gas headspace</td><td>above the electrolyte level — nearly insulates the top face</td></tr>
+    <tr><td>Inter-roll electrolyte gap</td><td>between the two jellyrolls (internal interface)</td></tr>
+  </table>
+</section>
+
+<section id="s7">
+  <div class="eyebrow"><span class="secnum">7</span><span class="chip co">COUPLED</span></div>
+  <h2>Two-way co-simulation loop</h2>
+  <p>Per timestep, iterated to convergence (the thermal→electrical leg closes the loop):</p>
+  <ul>
+    <li>Solve the collector network: foil potentials, per-CV currents, terminal voltage — using
+        each CV's parameters at its <em>current local temperature</em>.</li>
+    <li>Form the heat map: Bernardi + foil ohmic + tab Joule backflow.</li>
+    <li>Advance the 3-D temperature field (backward Euler).</li>
+    <li>Re-evaluate <var>R</var><sub>0</sub>, <var>R</var><sub>p</sub>, <var>C</var><sub>p</sub>
+        at the new temperatures; sub-iterate until ‖Δ<var>T</var>‖ &lt; tolerance.</li>
+    <li>Advance SOC and RC states with the converged currents.</li>
+  </ul>
+  <p>Hot regions get lower resistance → draw more current → heat more: the thermal-electrical
+  feedback that creates current crowding and utilization gradients is resolved, not prescribed.</p>
+</section>
+
+<section id="s8">
+  <div class="eyebrow"><span class="secnum">8</span><span class="chip co">COUPLED</span></div>
+  <h2>Conservation &amp; validation</h2>
+  <div class="eq"><span class="m">
+    ∫ <var>Q</var><sub>gen</sub> d<var>t</var> = Δ<var>U</var><sub>stored</sub> + ∫ <var>Q</var><sub>removed</sub> d<var>t</var>
+    &nbsp;&nbsp;&nbsp; (closure ~ 10<sup>−12</sup>)
+  </span><span class="tag">(13)</span></div>
+  <ul>
+    <li><b>Energy:</b> generated = stored + removed to machine precision, every run.</li>
+    <li><b>Charge:</b> Σ<var>i</var><sub>k</sub> = <var>I</var><sub>applied</sub> for both collector models, any stack axis.</li>
+    <li><b>Electrical ledger:</b> <var>I</var>(<var>U</var><sub>ocv</sub> − <var>V</var><sub>term</sub>) = ECM + foil + tab heat, verified to ~10⁻¹².</li>
+    <li><b>Invariance:</b> rotating the stack axis (x/y/z) leaves results identical to ~10⁻⁷.</li>
+    <li><b>Analytic limits:</b> 1-D conduction, lumped-capacitance transient, adiabatic ΔT = Q/(mc<sub>p</sub>), fin closed forms.</li>
+  </ul>
+  <p class="note">No physical constant or coefficient is hard-coded: geometry, materials, tables
+  and boundary conditions all come from configuration — the same equations run any cell you
+  describe.</p>
+</section>
+</div>
