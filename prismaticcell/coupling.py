@@ -39,6 +39,8 @@ class Result:
     # Final exact solved tab Joule dissipation per polarity [W] (from NetworkSolution) — feeds
     # the tab fin profile / overlays in viz without re-deriving from I^2/g_tab.
     p_tab_final: dict = field(default_factory=dict)  # {"pos": W, "neg": W}
+    # Final foil potential maps per polarity: {"pos": [per-roll (n_la,n_ha)], "neg": [...]}
+    phi_final: dict = field(default_factory=dict)
 
 
 def applied_at(cfg: SimConfig, t: float) -> Tuple[str, float]:
@@ -250,6 +252,9 @@ def run(cfg: SimConfig) -> Result:
         soc_field_final=soc_field, energy_balance=energy_balance, geom=geom,
         p_tab_final=({"pos": float(last_sol.p_tab_pos), "neg": float(last_sol.p_tab_neg)}
                      if last_sol is not None else {}),
+        phi_final=({"pos": [last_sol.phi_pos[r] for r in sorted(last_sol.phi_pos)],
+                    "neg": [last_sol.phi_neg[r] for r in sorted(last_sol.phi_neg)]}
+                   if last_sol is not None else {}),
     )
 
 
@@ -330,4 +335,6 @@ def _run_steady(cfg, geom, model, op, state, T_field, active_ijk) -> Result:
         q_total=np.array([q_step]), j_field_final=sol.j_area, soc_field_final=soc_field,
         energy_balance=energy_balance, geom=geom,
         p_tab_final={"pos": float(sol.p_tab_pos), "neg": float(sol.p_tab_neg)},
+        phi_final={"pos": [sol.phi_pos[r] for r in sorted(sol.phi_pos)],
+                   "neg": [sol.phi_neg[r] for r in sorted(sol.phi_neg)]},
     )

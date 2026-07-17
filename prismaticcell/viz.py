@@ -203,7 +203,7 @@ def plot_temperature_slice(result, k_index: Optional[int] = None, path: Optional
     return _save(fig, path)
 
 
-def _overlay_tabs(geom, tfield, ax, im=None, p_tab=None):
+def _overlay_tabs(geom, tfield, ax, im=None, p_tab=None, polarities=("pos", "neg")):
     """Draw each tab on the electrode-plane heatmap: the weld footprint (dashed outline, INSIDE
     the electrode — where the foils bundle and current enters) and the PHYSICAL tab protruding
     beyond the nearest height edge, coloured by its 1-D fin temperature profile (root → heat-sunk
@@ -225,6 +225,7 @@ def _overlay_tabs(geom, tfield, ax, im=None, p_tab=None):
     y_lo, y_hi = ax.get_ylim()
     prot_max_mm = 0.0
     style = {"pos": ("#ff5533", "+ tab"), "neg": ("#40c4ff", "− tab")}
+    style = {p: style[p] for p in polarities}
     for pol, (color, name) in style.items():
         cells = tab_attachment_cells(geom, pol)
         if not cells:
@@ -400,6 +401,61 @@ def tab_thermal_profiles(result, cooling=None, n: int = 25) -> dict:
         out[pol] = dict(xi=xi, T=T, T_root=t_root, T_sink=t_sink, T_peak=t_peak,
                         P=p_tab, R_tab=r_tab)
     return out
+
+
+def plot_collector_planes(result, path: Optional[str] = None):
+    """Per-current-collector view: one panel per foil, each with ONLY its own tab.
+
+    Left  = cathode current collector (Al): temperature on the electrode plane with the + tab.
+    Right = anode current collector (Cu): the same with the − tab.
+
+    One tab per collector — the + tab exists only on the Al foil, the − tab only on the Cu foil.
+    The thermal model homogenizes the sandwich, so both foils share the local temperature field;
+    what distinguishes the panels is which tab (and its weld/protrusion) belongs to that foil.
+    Each panel also overlays that foil's solved potential drop as contours (from ``phi_pos`` /
+    ``phi_neg``, thickness-averaged), showing the in-plane current path toward its tab.
+    """
+    geom = result.geom
+    _, la, ha = _axes(geom)
+    tfield = _final_T_field(result)
+    plane, info = _electrode_plane(geom, tfield, how="mid")
+    slice_ab = _k_to_c(plane)
+    extent = _extent_mm(geom)
+    p_tab = dict(getattr(result, "p_tab_final", {}) or {})
+
+    fig, axes = plt.subplots(1, 2, figsize=(14.5, 6), sharey=True)
+    panels = (("pos", "Cathode current collector (Al) — + tab", "phi_pos", axes[0]),
+              ("neg", "Anode current collector (Cu) — − tab", "phi_neg", axes[1]))
+    im = None
+    for pol, title, phi_attr, ax in panels:
+        im = ax.imshow(slice_ab.T, origin="lower", extent=extent, aspect="auto",
+                       cmap=_CMAP_TEMP, vmin=np.nanmin(slice_ab), vmax=np.nanmax(slice_ab))
+        # this foil's potential (thickness-averaged over rolls), as contours toward its tab
+        phi_rolls = getattr(result, "phi_final", None)
+        phi = None
+        if phi_rolls is None:
+            # phi maps are carried per roll on the last network solution when the caller kept it;
+            # fall back to skipping contours if unavailable on the Result.
+            pass
+        else:
+            maps = [m for m in phi_rolls.get(pol, []) if m is not None]
+            if maps:
+                phi = np.nanmean(np.stack(maps), axis=0)
+        if phi is not None and np.isfinite(phi).any():
+            grid = geom.grid
+            coords = (grid.xc, grid.yc, grid.zc)
+            X, Y = np.meshgrid(coords[la] * 1e3, coords[ha] * 1e3, indexing="ij")
+            dv = (phi - np.nanmin(phi)) * 1e3           # mV above the foil minimum
+            cs = ax.contour(X, Y, dv, levels=6, colors="white", linewidths=0.7, alpha=0.75)
+            ax.clabel(cs, inline=True, fontsize=6, fmt="%.1f mV")
+        _overlay_tabs(geom, tfield, ax, im, p_tab, polarities=(pol,))
+        ax.set_xlabel(f"length ({_AXNAME[la]}) [mm]")
+        ax.set_title(title, fontsize=11)
+    axes[0].set_ylabel(f"height ({_AXNAME[ha]}) [mm]")
+    cbar = fig.colorbar(im, ax=list(axes), shrink=0.9)
+    cbar.set_label("Temperature [°C]")
+    fig.suptitle(f"Per-collector view ({info}) — one tab per foil", fontsize=12)
+    return _save(fig, path)
 
 
 def plot_tab_temperature(result, cooling=None, path: Optional[str] = None):
