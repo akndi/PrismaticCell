@@ -12,3 +12,8 @@ outputs/
 # showcase figures (committed)
 !docs/figures/
 !docs/figures/*.png
+
+# notebook-generated artifacts
+configs/_notebook_cell.yaml
+configs/_cycling_profile.csv
+notebooks/.ipynb_checkpoints/
