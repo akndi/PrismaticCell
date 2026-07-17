@@ -259,12 +259,31 @@ def _overlay_tabs(geom, tfield, ax, im=None, p_tab=None, polarities=("pos", "neg
         band = 0.03 * H_mm
         ax.add_patch(Rectangle((x0, edge - (band if up else 0.0)), x1 - x0, band,
                                facecolor=color, edgecolor="none", alpha=0.95, zorder=6))
-        # physical tab: a clean stub outside the edge (neutral fill — its temperature lives in
-        # the fin-profile plot; painting it with an off-scale colormap reads as black)
+        # physical tab: stub outside the edge, PAINTED with its 1-D fin temperature profile on
+        # the heatmap's colour scale (the tab is a sub-grid fin, not meshed CVs — this analytic
+        # profile is its model temperature; values beyond the plane's range clip at the scale end)
         if prot_mm > 0.0:
+            gcond = float(getattr(geom, f"tab_heat_cond_{pol}", 0.0))
+            gfin = float(getattr(geom, f"tab_fin_cond_{pol}", 0.0)) or gcond
+            p_w = float(p_tab.get(pol, 0.0))
+            t_sink = _tab_sink_temp(None, geom, tfield)
+            nseg = 24
+            for s in range(nseg):
+                xi = (s + 0.5) / nseg
+                if gcond > 0.0:                              # heat-sunk tip
+                    t_seg = (t_root + (t_sink - t_root) * xi
+                             + (p_w / (2.0 * gcond)) * xi * (1.0 - xi))
+                elif gfin > 0.0 and p_w > 0.0:               # adiabatic tip: hotter toward tip
+                    t_seg = t_root + (p_w / gfin) * (xi - 0.5 * xi**2)
+                else:
+                    t_seg = t_root
+                fc = im.cmap(im.norm(_k_to_c(t_seg))) if im is not None else "#f0f0f0"
+                ax.add_patch(Rectangle((x0, edge + sgn * (s / nseg) * prot_mm),
+                                       x1 - x0, sgn * prot_mm / nseg,
+                                       facecolor=fc, edgecolor="none", zorder=6, clip_on=False))
             ax.add_patch(Rectangle((x0, edge), x1 - x0, sgn * prot_mm,
-                                   facecolor="#f0f0f0", edgecolor=color, linewidth=1.8,
-                                   zorder=6, clip_on=False))
+                                   fill=False, edgecolor=color, linewidth=1.8,
+                                   zorder=7, clip_on=False))
             prot_max_mm = max(prot_max_mm, prot_mm)
         # label beside the stub, outside the plane (neutral ink; the colored stub carries identity)
         ax.annotate(f"{name}   root {_k_to_c(t_root):.1f} °C",
@@ -393,8 +412,14 @@ def tab_thermal_profiles(result, cooling=None, n: int = 25) -> dict:
         r_tab = 1.0 / gtab if gtab > 0.0 else float("inf")
         # prefer the exact solved tab dissipation carried on the Result; lumped I^2*R fallback
         p_tab = float(p_exact.get(pol, 0.0)) or (i_term * i_term * r_tab if gtab > 0.0 else 0.0)
+        gfin = float(getattr(geom, f"tab_fin_cond_{pol}", 0.0)) or gcond
         if gcond > 0.0 and np.isfinite(p_tab):
+            # heat-sunk tip: linear conduction + symmetric self-heating bump
             T = t_root + (t_sink - t_root) * xi + (p_tab / (2.0 * gcond)) * xi * (1.0 - xi)
+            t_peak = float(np.max(T))
+        elif gfin > 0.0 and np.isfinite(p_tab) and p_tab > 0.0:
+            # adiabatic tip: all P exits through the root, T RISES toward the tip
+            T = t_root + (p_tab / gfin) * (xi - 0.5 * xi**2)
             t_peak = float(np.max(T))
         else:
             T = None
@@ -487,10 +512,17 @@ def plot_tab_temperature(result, cooling=None, path: Optional[str] = None):
                       f"{_k_to_c(p['T_peak']):.2f} °C, I²R={p['P']:.2g} W")
         ipk = int(np.argmax(p["T"]))
         ax.plot(p["xi"][ipk], _k_to_c(p["T"][ipk]), marker="o", color=c, ms=7)
-    t_sink = next(iter(prof.values()))["T_sink"]
-    ax.axhline(_k_to_c(t_sink), color="gray", ls="--", lw=1,
-               label=f"terminal sink {_k_to_c(t_sink):.2f} °C")
-    ax.set_xlabel("position along tab  (0 = root / weld,  1 = heat-sunk tip)")
+    geom = result.geom
+    sunk = (float(getattr(geom, "tab_heat_cond_pos", 0.0)) > 0.0
+            or float(getattr(geom, "tab_heat_cond_neg", 0.0)) > 0.0)
+    if sunk:
+        t_sink = next(iter(prof.values()))["T_sink"]
+        ax.axhline(_k_to_c(t_sink), color="gray", ls="--", lw=1,
+                   label=f"terminal sink {_k_to_c(t_sink):.2f} °C")
+        tip_lbl = "heat-sunk tip"
+    else:
+        tip_lbl = "tip (adiabatic — terminal not heat-sunk)"
+    ax.set_xlabel(f"position along tab  (0 = root / weld,  1 = {tip_lbl})")
     ax.set_ylabel("Temperature [°C]")
     ax.set_title("Tab temperature (1-D fin with I²R self-heating)")
     ax.legend(loc="best", fontsize=8)

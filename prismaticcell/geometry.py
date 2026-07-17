@@ -81,8 +81,13 @@ class Geometry:
     contact_conductance: float = 0.0   # W/m^2/K, stack<->can-wall interfacial conductance
     g_tab_pos: float = 0.0             # S, total physical conductance of the +tab(s): sigma*w*t/L
     g_tab_neg: float = 0.0             # S, total physical conductance of the -tab(s)
-    tab_heat_cond_pos: float = 0.0     # W/K, +tab conduction to ambient (thermal loss path)
-    tab_heat_cond_neg: float = 0.0     # W/K, -tab conduction to ambient
+    tab_heat_cond_pos: float = 0.0     # W/K, +tab conduction to the terminal sink (0 = no sink)
+    tab_heat_cond_neg: float = 0.0     # W/K, -tab conduction to the terminal sink
+    # Physical fin-body conductance k*A/L of each tab [W/K], ALWAYS set (independent of
+    # tab_heat_sink): it fixes the tab's internal temperature profile even when the tip is
+    # adiabatic (T rises toward the tip as T_root + (P/G_fin)(xi - xi^2/2)).
+    tab_fin_cond_pos: float = 0.0
+    tab_fin_cond_neg: float = 0.0
     # Sub-grid wall shell (wall_model="shell"): the enclosure wall wraps the cavity boundary as a
     # conductive skin instead of being meshed. Zero when meshed as volume cells or no wall.
     wall_thickness: float = 0.0        # m, shell thickness
@@ -397,6 +402,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         else:
             g_tab_neg += mat.sigma_elec * xsec / Lp
             tab_heat_neg += mat.k_in * xsec / Lp
+    tab_fin_pos, tab_fin_neg = tab_heat_pos, tab_heat_neg   # fin body kA/L, kept unconditionally
     if not cfg.enclosure.tab_heat_sink:
         tab_heat_pos = tab_heat_neg = 0.0   # tabs thermally isolated (no far-end heat sink)
     tab_protrusion: Dict[str, float] = {}
@@ -507,6 +513,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         contact_conductance=cfg.enclosure.contact_conductance,
         g_tab_pos=g_tab_pos, g_tab_neg=g_tab_neg,
         tab_heat_cond_pos=tab_heat_pos, tab_heat_cond_neg=tab_heat_neg,
+        tab_fin_cond_pos=tab_fin_pos, tab_fin_cond_neg=tab_fin_neg,
         wall_thickness=(wall_real if shell else 0.0),
         wall_k=(can_mat.k_in if shell else 0.0),
         wall_rhocp=(can_mat.density * can_mat.cp if shell else 0.0),

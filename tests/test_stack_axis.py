@@ -470,10 +470,18 @@ def test_tab_thermal_fin_profile():
         lin = p["T_root"] + (p["T_sink"] - p["T_root"]) * xi          # self-heating bump >= 0
         assert np.all(p["T"] >= lin - 1e-9)
 
-    # non-heat-sunk tab -> no fin profile (only the root is meaningful)
+    # non-heat-sunk tab -> adiabatic-tip parabola from the fin BODY conductance:
+    #   T = T_root + (P/G_fin)(xi - xi^2/2), monotonically rising, tip = root + P/(2 G_fin)
     cfg.enclosure.tab_heat_sink = False
-    p2 = viz.tab_thermal_profiles(coupling.run(cfg), cool)["pos"]
-    assert p2["T"] is None and np.isfinite(p2["T_root"])
+    r2 = coupling.run(cfg)
+    p2 = viz.tab_thermal_profiles(r2, cool)["pos"]
+    gfin = r2.geom.tab_fin_cond_pos
+    assert gfin > 0.0 and r2.geom.tab_heat_cond_pos == 0.0     # body G kept, sink G zeroed
+    xi = p2["xi"]
+    expect2 = p2["T_root"] + p2["P"] / gfin * (xi - 0.5 * xi**2)
+    assert np.allclose(p2["T"], expect2, rtol=1e-9, atol=1e-9)
+    assert np.all(np.diff(p2["T"]) >= -1e-12)                  # hotter toward the tip
+    assert np.isclose(p2["T_peak"], p2["T_root"] + p2["P"] / (2 * gfin))
 
 
 def test_inter_roll_gap_is_electrolyte_layer():
