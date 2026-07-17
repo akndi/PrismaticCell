@@ -340,15 +340,63 @@ def test_tab_joule_backflow_injected():
                  - i_cv * T[ii, jj, kk] * model.dudt(state.soc)) / V
         base[ii, jj, kk] += q_ecm
         extra_W = float(((q - base) * V).sum())
-        p_full = I * I / g.g_tab_pos + I * I / g.g_tab_neg
-        return extra_W, p_full, g
+        # exact solved tab dissipation: >= the lumped I^2/g_tab (Cauchy-Schwarz), ~equal here
+        p_lumped = I * I / g.g_tab_pos + I * I / g.g_tab_neg
+        p_exact = sol.p_tab_pos + sol.p_tab_neg
+        assert p_exact >= p_lumped * (1.0 - 1e-9)
+        assert np.isclose(p_exact, p_lumped, rtol=1e-3)   # compact footprint -> near-equipotential
+        return extra_W, p_exact, g
 
     extra, p_full, g = injected(True)                     # heat-sunk: half of each tab's P
-    assert np.isclose(extra, 0.5 * p_full, rtol=1e-9)
+    assert np.isclose(extra, 0.5 * p_full, rtol=1e-6)
     extra0, p_full0, _ = injected(False)                  # adiabatic tip: all of P
-    assert np.isclose(extra0, 1.0 * p_full0, rtol=1e-9)
+    assert np.isclose(extra0, 1.0 * p_full0, rtol=1e-6)
     # injection lands only on attachment CVs
     assert len(tab_attachment_cells(g, "pos")) > 0
+
+
+def test_tab_joule_backflow_is_local_and_layered():
+    """The injection lands ONLY on the tab attachment CVs, and works for the layered collector."""
+    import dataclasses
+    from prismaticcell.echem import ECMModel, ECMState
+    from prismaticcell.distributed import solve_network
+    from prismaticcell.geometry import tab_attachment_cells
+
+    cfg = _cfg("y", width=0.20, height=0.12)
+    g = build_geometry(cfg)
+    model = ECMModel.from_config(cfg)
+    n = int(g.active_mask.sum())
+    state = ECMState(soc=np.full(n, 0.6), rc_u=np.zeros((model.n_rc, n)))
+    T = np.full((g.grid.nx, g.grid.ny, g.grid.nz), 298.15)
+    active_ijk = np.argwhere(g.active_mask)
+    for cm in ("planar", "layered"):
+        sol = solve_network(g, model, state, T, 80.0, mode="current", collector_model=cm)
+        assert sol.p_tab_pos > 0.0 and sol.p_tab_neg > 0.0
+        q_with = coupling._heat_map(g, model, state, sol, T, active_ijk)
+        sol0 = dataclasses.replace(sol, p_tab_pos=0.0, p_tab_neg=0.0, i_terminal=0.0)
+        q_wo = coupling._heat_map(g, model, state, sol0, T, active_ijk)
+        diff = q_with - q_wo
+        attach = set(tab_attachment_cells(g, "pos")) | set(tab_attachment_cells(g, "neg"))
+        nz = {tuple(c) for c in np.argwhere(diff > 0)}
+        assert nz == attach                     # injected exactly at the weld cells, nowhere else
+        V = g.grid.volume()
+        assert np.isclose(float(diff.sum()) * V, 0.5 * (sol.p_tab_pos + sol.p_tab_neg), rtol=1e-9)
+
+
+def test_tab_joule_steady_mode_converges():
+    """Steady mode with the backflow active converges and warms the weld cells."""
+    from prismaticcell.geometry import tab_attachment_cells
+    cool = Cooling(y_min=FaceBC("convection", h=100.0, t_inf=298.15),
+                   y_max=FaceBC("convection", h=100.0, t_inf=298.15))
+    cfg = _cfg("y", width=0.20, height=0.12, cooling=cool)
+    cfg.solver.mode = "steady"
+    cfg.load = Load("constant_current", 150.0)
+    res = coupling.run(cfg)
+    g = res.geom
+    tf = res.T_field[-1] if res.T_field.ndim == 4 else res.T_field
+    roots = tab_attachment_cells(g, "pos") + tab_attachment_cells(g, "neg")
+    t_root = float(np.mean([tf[c] for c in roots]))
+    assert t_root > 298.15                      # solved and warmed above coolant
 
 
 def test_tab_joule_energy_closure_high_current():

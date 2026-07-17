@@ -162,8 +162,21 @@ coefficient `dU/dT` is stored directly in the entropy table, so the minus sign l
 equation. (For LFP mid-SOC, `dU/dT < 0`, so discharge is mildly exothermic reversibly.)
 
 Total CV heat `Q_k = q_ecm,k + q_rev,k + q_ohm,k` (W), converted to a volumetric density
-`q'''_k = Q_k / V_cv` and injected into the thermal solver. Tab and contact-resistance Joule
-heating are added at their regions.
+`q'''_k = Q_k / V_cv` and injected into the thermal solver.
+
+**Tab Joule backflow (two-way tab coupling).** The tab's own ohmic dissipation
+`P_tab = Σ_nodes G_node (φ_node − V_term)²` (the exact solved value per polarity, carried on the
+network solution; ≥ the lumped `I²/g_tab`, equal for an equipotential footprint) is generated in
+the tab metal *outside* the mesh. It is modelled as a steady 1-D fin with uniform generation:
+**half of `P_tab` returns through the root** into the tab attachment CVs (the other half exits
+directly to the heat-sunk terminal and never enters the mesh); with `tab_heat_sink: false` the tip
+is adiabatic and **all** of `P_tab` returns. The injected heat raises the near-tab temperature,
+which feeds back into the local ECM parameters — a genuine two-way path. The `1/2` split is exact
+because the tab's electrical and thermal conductances are built from the same cross-section and
+protrusion (generation is uniform over exactly the root-to-sink resistance); adding a separate tip
+contact/busbar resistance later would shift the root share above `1/2` and this factor must then be
+revisited. Electrical contact/weld resistance beyond the tab body, and contact-resistance Joule
+heating, are not modeled (`enclosure.contact_conductance` is purely thermal).
 
 `dU/dT` is the entropic coefficient from the entropy table. For LFP it is small and sign-changing
 across SOC — captured by the table, not assumed.
@@ -203,9 +216,11 @@ Faces may be named **physically** (`top`/`bottom` = +z/-z, `x_min/x_max`, `y_min
   parallel** with the convective film, both in series with the half-cell conduction. Assumes a
   **gray-diffuse surface with view factor 1** to large isothermal surroundings at `T_∞` (valid
   for an isolated convex cell); the radiative sink is taken equal to the convective `T_∞`.
-- **Tab heat loss** (`enclosure.tab_heat_sink`, default on): each tab conducts heat from its
+- **Tab heat path** (`enclosure.tab_heat_sink`, default on): each tab conducts heat from its
   attachment control volumes to ambient with conductance `k·w·t/L` (far end heat-sunk near the
-  mean coolant temperature). A real terminal heat path; disable for thermally isolated tabs.
+  mean coolant temperature) **and returns half of its own Joule dissipation into those CVs (all of
+  it when not heat-sunk) — see §4 tab Joule backflow**. A real bidirectional terminal heat path;
+  with `tab_heat_sink: false` the tab becomes a pure heat source into its root.
 - **Stack↔wall contact** (`enclosure.contact_conductance`): a series interfacial conductance
   `G = h_c·A` at the wall interface (at can-wall control-volume faces in `mesh` mode, or in the
   boundary BC series in `shell` mode).

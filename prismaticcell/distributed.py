@@ -66,8 +66,9 @@ The in-plane foil Joule heat of an edge is ``P_edge = G_edge (φ_a − φ_b)²``
 power is split equally to its two endpoint columns and summed over both foils, giving a
 per-column foil heat ``P_col``. ``P_col`` is distributed to the column's active z-cells in
 proportion to their ``area_eff`` (uniform per column here), then divided by the CV thermal
-volume ``grid.volume()`` to yield ``q_ohm_vol`` [W/m³]. (Tab/contact Joule heating is a
-separate region contribution per PHYSICS §4 and is not included here.)
+volume ``grid.volume()`` to yield ``q_ohm_vol`` [W/m³]. (Tab Joule heating is NOT included
+here: the exact solved value is returned as ``p_tab_pos``/``p_tab_neg`` and injected at the tab
+attachment CVs by ``coupling._heat_map`` per PHYSICS §4; contact Joule heating is not modeled.)
 
 State-array ordering
 --------------------
@@ -120,6 +121,11 @@ class NetworkSolution:
     q_ohm_vol: np.ndarray             # (nx,ny,nz) foil ohmic heat density [W/m^3]
     dphi_field: np.ndarray = None     # (nx,ny,nz) local stack Δφ = φ⁺-φ⁻ per active CV [V]
                                       # (per-column in "planar", per-CV in "layered")
+    # Exact solved tab Joule dissipation per polarity [W]: Σ over tab nodes of G_node*(φ-V_term)².
+    # ≥ the lumped I²/g_tab (Cauchy-Schwarz; equal when the footprint is equipotential). Consumed
+    # by coupling._heat_map for the tab heat backflow into the attachment CVs (PHYSICS §4).
+    p_tab_pos: float = 0.0
+    p_tab_neg: float = 0.0
 
 
 def _active_index_field(geom: Geometry) -> np.ndarray:
@@ -335,6 +341,17 @@ def solve_network(
         Vp = Vp_fixed
     v_terminal = Vp - Vn
 
+    # exact tab Joule dissipation from the solved node potentials (per polarity)
+    p_tab_pos = p_tab_neg = 0.0
+    for roll in geom.rolls:
+        r = roll.roll_index
+        for c in roll.tab_pos_nodes:
+            dv = x[pos_dof[(r, c)]] - Vp
+            p_tab_pos += G_pos * dv * dv
+        for c in roll.tab_neg_nodes:
+            dv = x[neg_dof[(r, c)]] - Vn
+            p_tab_neg += G_neg * dv * dv
+
     # ---- reconstruct potentials, currents, and ohmic heat ----------------------
     phi_pos: Dict[int, np.ndarray] = {}
     phi_neg: Dict[int, np.ndarray] = {}
@@ -406,6 +423,8 @@ def solve_network(
         i_terminal=i_terminal,
         q_ohm_vol=q_ohm_vol,
         dphi_field=dphi_field,
+        p_tab_pos=float(p_tab_pos),
+        p_tab_neg=float(p_tab_neg),
     )
 
 
@@ -546,6 +565,21 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
     Vp = float(x[vp_dof]) if current_mode else Vp_fixed
     v_terminal = Vp - Vn
 
+    # exact tab Joule dissipation from the solved node potentials (all layers in parallel)
+    p_tab_pos = p_tab_neg = 0.0
+    for roll in geom.rolls:
+        r = roll.roll_index
+        for c in roll.tab_pos_nodes:
+            for k in roll_layers[r]:
+                if is_active(roll, k, c):
+                    dv = x[pos_dof[(r, k, c)]] - Vp
+                    p_tab_pos += G_pos * dv * dv
+        for c in roll.tab_neg_nodes:
+            for k in roll_layers[r]:
+                if is_active(roll, k, c):
+                    dv = x[neg_dof[(r, k, c)]] - Vn
+                    p_tab_neg += G_neg * dv * dv
+
     # ---- reconstruct fields ----------------------------------------------------
     phi_pos: Dict[int, np.ndarray] = {}
     phi_neg: Dict[int, np.ndarray] = {}
@@ -595,4 +629,5 @@ def _solve_layered(geom, model, state, T_field, applied, *, mode="current"):
         j_area=j_area, i_cv=i_cv, phi_pos=phi_pos, phi_neg=phi_neg,
         v_terminal=float(v_terminal), i_terminal=float(i_cv.sum()),
         q_ohm_vol=q_ohm_vol, dphi_field=dphi_field,
+        p_tab_pos=float(p_tab_pos), p_tab_neg=float(p_tab_neg),
     )

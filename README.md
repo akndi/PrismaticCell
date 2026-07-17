@@ -31,7 +31,8 @@ with anisotropy, cooling faces and plots all in those physical axes. See
   cooling), and **radiation** (per-face `emissivity`, linearized Stefan–Boltzmann about the film
   temperature). The thin can wall is a **sub-grid conductive shell** (lateral spreading + a metal
   path to the cooled faces + wall mass) so it contributes without needing >100 in-plane cells;
-  tabs carry electrical *and* thermal resistance. Internal gaps are effective-conduction media.
+  tabs carry electrical *and* thermal resistance, and return half of their own I²R Joule heat
+  into the weld cells (two-way tab coupling). Internal gaps are effective-conduction media.
   An optional **bottom/top insulator** (`enclosure.insulator`, e.g. a 0.5 mm polypropylene film on
   the can floor) and a **jellyroll wrap** (`assembly.roll_wrap`, e.g. 50 µm mylar on the roll's
   side faces) are sub-grid conductive layers that add their `t/k` resistance in series on the

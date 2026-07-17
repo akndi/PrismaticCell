@@ -54,6 +54,10 @@ class Geometry:
     outer_dims: tuple[float,float,float]     # (Lx,Ly,Lz) [m]
 
 def build_geometry(cfg: SimConfig) -> Geometry: ...
+
+def tab_attachment_cells(geom: Geometry, polarity: str) -> list[tuple[int,int,int]]: ...
+    # physical (i,j,k) CVs a tab polarity is welded to (its root) — the single source of truth
+    # shared by thermal (tab conduction path), coupling (tab Joule backflow), and viz (tab T_root)
 ```
 
 Construction rules: outer box = can wall (`enclosure.wall_thickness`) around a cavity holding the
@@ -184,7 +188,7 @@ class Result:
     geom: Geometry
 
 def run(cfg: SimConfig) -> Result:
-    # transient: for each dt -> solve_network -> heat map (q_ecm+q_rev+q_ohm) -> step_transient
+    # transient: for each dt -> solve_network -> heat map (q_ecm+q_rev+q_ohm+tab Joule backflow) -> step_transient
     #            -> advance soc/rc -> re-evaluate T-dependent params. Sub-iterate to coupling_tol.
     # steady: fixed operating current; iterate network<->solve_steady to self-consistency.
 

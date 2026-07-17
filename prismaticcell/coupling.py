@@ -110,23 +110,30 @@ def _heat_map(geom: Geometry, model: ECMModel, state: ECMState, sol,
     # and never enters the cell); with no heat sink (adiabatic tip, tab_heat_cond = 0) ALL of P
     # must return through the root. Two-way coupling: this heat raises the near-tab temperature,
     # which feeds back into the local ECM parameters on the next sub-iteration.
+    # P per polarity = the network's EXACT solved tab dissipation Σ G_node*(φ-V_term)² when the
+    # solution carries it (≥ the lumped I²/g_tab by Cauchy-Schwarz; equal for an equipotential
+    # footprint); the lumped form is the fallback for solutions that don't.
     i_term = float(getattr(sol, "i_terminal", 0.0) or 0.0)
-    if i_term != 0.0:
-        for pol, g_tab, g_sink in (
-                ("pos", float(getattr(geom, "g_tab_pos", 0.0)),
-                 float(getattr(geom, "tab_heat_cond_pos", 0.0))),
-                ("neg", float(getattr(geom, "g_tab_neg", 0.0)),
-                 float(getattr(geom, "tab_heat_cond_neg", 0.0)))):
-            if g_tab <= 0.0:
-                continue
-            p_tab = i_term * i_term / g_tab             # full tab ohmic dissipation [W]
-            frac = 0.5 if g_sink > 0.0 else 1.0         # fin split: half to root, half to sink
-            cells = tab_attachment_cells(geom, pol)
-            if not cells:
-                continue
-            q_each = frac * p_tab / (len(cells) * V)    # volumetric share per attachment CV
-            for (ci, cj, ck) in cells:
-                q_vol[ci, cj, ck] += q_each
+    for pol, p_exact, g_tab, g_sink in (
+            ("pos", float(getattr(sol, "p_tab_pos", 0.0) or 0.0),
+             float(getattr(geom, "g_tab_pos", 0.0)),
+             float(getattr(geom, "tab_heat_cond_pos", 0.0))),
+            ("neg", float(getattr(sol, "p_tab_neg", 0.0) or 0.0),
+             float(getattr(geom, "g_tab_neg", 0.0)),
+             float(getattr(geom, "tab_heat_cond_neg", 0.0)))):
+        if p_exact > 0.0:
+            p_tab = p_exact                              # exact solved tab dissipation [W]
+        elif g_tab > 0.0 and i_term != 0.0:
+            p_tab = i_term * i_term / g_tab              # lumped fallback [W]
+        else:
+            continue
+        frac = 0.5 if g_sink > 0.0 else 1.0              # fin split: half to root, half to sink
+        cells = tab_attachment_cells(geom, pol)
+        if not cells:
+            continue
+        q_each = frac * p_tab / (len(cells) * V)         # volumetric share per attachment CV
+        for (ci, cj, ck) in cells:
+            q_vol[ci, cj, ck] += q_each
     return q_vol
 
 
