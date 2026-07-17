@@ -192,6 +192,8 @@ def plot_temperature_slice(result, k_index: Optional[int] = None, path: Optional
     thot = float(slice_ab[ahot, bhot])
     ax.plot(xhot, yhot, marker="x", markersize=12, markeredgewidth=2.5,
             color="cyan", label=f"hotspot {thot:.2f} °C")
+
+    _overlay_tabs(geom, tfield, ax)
     ax.legend(loc="upper right", fontsize=8)
 
     ax.set_xlabel(f"length ({_AXNAME[la]}) [mm]")
@@ -199,6 +201,45 @@ def plot_temperature_slice(result, k_index: Optional[int] = None, path: Optional
     ax.set_title(f"Temperature on the electrode plane ({info})")
     fig.tight_layout()
     return _save(fig, path)
+
+
+def _overlay_tabs(geom, tfield, ax):
+    """Outline each tab's weld footprint on the electrode plane, labelled with its SOLVED root
+    temperature (mean of the attachment CVs — includes the tab Joule backflow).
+
+    The rectangle spans the actual attachment columns (the model's discrete footprint), extended
+    by half a cell so it covers the full weld cells.
+    """
+    from .geometry import tab_attachment_cells
+    from matplotlib.patches import Rectangle
+
+    grid = geom.grid
+    _, la, ha = _axes(geom)
+    d = (grid.dx, grid.dy, grid.dz)
+    hw, hh = d[la] * 1e3 / 2.0, d[ha] * 1e3 / 2.0
+    style = {"pos": ("#ff5533", "+ tab"), "neg": ("#40c4ff", "− tab")}
+    for pol, (color, name) in style.items():
+        cells = tab_attachment_cells(geom, pol)
+        if not cells:
+            continue
+        pts = sorted({(c[la], c[ha]) for c in cells})       # electrode-plane columns of the weld
+        xy = [_cell_center_mm(geom, a, b) for (a, b) in pts]
+        xs, ys = zip(*xy)
+        rect = Rectangle((min(xs) - hw, min(ys) - hh),
+                         (max(xs) - min(xs)) + 2 * hw, (max(ys) - min(ys)) + 2 * hh,
+                         fill=False, edgecolor=color, linewidth=2.2, zorder=6)
+        ax.add_patch(rect)
+        t_root = _k_to_c(_tab_root_temp(geom, tfield, pol))
+        # label below the footprint when it hugs the top edge of the plane, else above
+        y_lo, y_hi = ax.get_ylim()
+        near_top = (max(ys) + hh) > y_lo + 0.85 * (y_hi - y_lo)
+        xy = (0.5 * (min(xs) + max(xs)), (min(ys) - hh) if near_top else (max(ys) + hh))
+        ax.annotate(f"{name}  {t_root:.2f} °C", xy=xy,
+                    xytext=(0, -6 if near_top else 6), textcoords="offset points",
+                    ha="center", va="top" if near_top else "bottom",
+                    fontsize=8, fontweight="bold", color=color,
+                    bbox=dict(boxstyle="round,pad=0.2", fc="black", alpha=0.55, ec="none"),
+                    zorder=7)
 
 
 # --------------------------------------------------------------------------- #
@@ -304,6 +345,7 @@ def tab_thermal_profiles(result, cooling=None, n: int = 25) -> dict:
     tfield = _final_T_field(result)
     i_term = float(np.asarray(result.i_terminal, dtype=float).ravel()[-1])
     t_sink = _tab_sink_temp(cooling, geom, tfield)
+    p_exact = dict(getattr(result, "p_tab_final", {}) or {})
     xi = np.linspace(0.0, 1.0, int(max(n, 2)))
     out = {}
     for pol, gtab, gcond in (
@@ -312,7 +354,8 @@ def tab_thermal_profiles(result, cooling=None, n: int = 25) -> dict:
     ):
         t_root = _tab_root_temp(geom, tfield, pol)
         r_tab = 1.0 / gtab if gtab > 0.0 else float("inf")
-        p_tab = i_term * i_term * r_tab if gtab > 0.0 else 0.0
+        # prefer the exact solved tab dissipation carried on the Result; lumped I^2*R fallback
+        p_tab = float(p_exact.get(pol, 0.0)) or (i_term * i_term * r_tab if gtab > 0.0 else 0.0)
         if gcond > 0.0 and np.isfinite(p_tab):
             T = t_root + (t_sink - t_root) * xi + (p_tab / (2.0 * gcond)) * xi * (1.0 - xi)
             t_peak = float(np.max(T))
