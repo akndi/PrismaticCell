@@ -66,9 +66,10 @@ enclosure:
 tabs:
   # Footprint on the electrode (length x height) plane; thickness/material DEFAULT to the
   # current collector (Al 13 um for +, Cu 6 um for -). loc_* are fractional 0..1; size_* in m.
-  # Here both tabs sit near the top edge (height ~ 0.95), at 15% and 85% along the length.
-  - {polarity: pos, loc_length: 0.15, loc_height: 0.95, size_length: 0.05, size_height: 0.010, protrusion: 0.012}
-  - {polarity: neg, loc_length: 0.85, loc_height: 0.95, size_length: 0.05, size_height: 0.010, protrusion: 0.012}
+  # Weld zone FLUSH with the top edge (foils exit the electrode there): center = 1 - size/2/H
+  # = 1 - 0.005/0.120 -> footprint spans [110, 120] mm of the 120 mm height.
+  - {polarity: pos, loc_length: 0.15, loc_height: 0.9583, size_length: 0.05, size_height: 0.010, protrusion: 0.012}
+  - {polarity: neg, loc_length: 0.85, loc_height: 0.9583, size_length: 0.05, size_height: 0.010, protrusion: 0.012}
 
 mesh:
   nx: 24                    # along length (X)
