@@ -8,6 +8,7 @@ next step. Genuinely bidirectional — verified by the global energy balance rec
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, Tuple, List, Optional
 
@@ -41,6 +42,10 @@ class Result:
     p_tab_final: dict = field(default_factory=dict)  # {"pos": W, "neg": W}
     # Final foil potential maps per polarity: {"pos": [per-roll (n_la,n_ha)], "neg": [...]}
     phi_final: dict = field(default_factory=dict)
+    # Per-step FIELD histories (solver.save_fields=True): SOC and areal current density
+    # (nt, nx, ny, nz), NaN at inactive cells. Empty arrays when recording is off.
+    soc_hist: np.ndarray = field(default_factory=lambda: np.zeros((0,)))
+    j_hist: np.ndarray = field(default_factory=lambda: np.zeros((0,)))
 
 
 def applied_at(cfg: SimConfig, t: float) -> Tuple[str, float]:
@@ -71,7 +76,10 @@ _PROFILE_CACHE: Dict[str, np.ndarray] = {}
 
 
 def _load_profile(path: str) -> np.ndarray:
-    if path not in _PROFILE_CACHE:
+    # cache key includes the file mtime so a regenerated profile (e.g. new cycling parameters
+    # written to the same path by a notebook) is re-read instead of served stale
+    key = f"{path}:{os.path.getmtime(path)}"
+    if key not in _PROFILE_CACHE:
         rows = []
         with open(path) as fh:
             for line in fh:
@@ -83,8 +91,8 @@ def _load_profile(path: str) -> np.ndarray:
                     rows.append([float(parts[0]), float(parts[1])])
                 except (ValueError, IndexError):
                     continue  # header
-        _PROFILE_CACHE[path] = np.array(rows, dtype=float)
-    return _PROFILE_CACHE[path]
+        _PROFILE_CACHE[key] = np.array(rows, dtype=float)
+    return _PROFILE_CACHE[key]
 
 
 def _heat_map(geom: Geometry, model: ECMModel, state: ECMState, sol,
@@ -176,6 +184,9 @@ def run(cfg: SimConfig) -> Result:
     times, vt, it_, socm = [], [], [], []
     Tm, Tmx, Tmn, qtot = [], [], [], []
     T_hist: List[np.ndarray] = []
+    save_fields = bool(getattr(cfg.solver, "save_fields", False))
+    soc_hist: List[np.ndarray] = []
+    j_hist: List[np.ndarray] = []
 
     gen_energy = 0.0
     removed_energy = 0.0
@@ -227,6 +238,13 @@ def run(cfg: SimConfig) -> Result:
         Tmn.append(float(T_new.min()))
         qtot.append(q_step)
         T_hist.append(T_new.copy())
+        if save_fields:
+            sf = np.full((nx, ny, nz), np.nan)
+            sf[ii, jj, kk] = state.soc
+            soc_hist.append(sf)
+            jf = np.full((nx, ny, nz), np.nan)
+            jf[ii, jj, kk] = sol.j_area[ii, jj, kk]
+            j_hist.append(jf)
         # ---- stop once the cell is fully discharged/charged (avoid unphysical over-run) ----
         soc_mean = float(state.soc.mean())
         if soc_mean <= 1e-6 or soc_mean >= 1.0 - 1e-6:
@@ -255,6 +273,8 @@ def run(cfg: SimConfig) -> Result:
         phi_final=({"pos": [last_sol.phi_pos[r] for r in sorted(last_sol.phi_pos)],
                     "neg": [last_sol.phi_neg[r] for r in sorted(last_sol.phi_neg)]}
                    if last_sol is not None else {}),
+        soc_hist=(np.array(soc_hist) if soc_hist else np.zeros((0,))),
+        j_hist=(np.array(j_hist) if j_hist else np.zeros((0,))),
     )
 
 

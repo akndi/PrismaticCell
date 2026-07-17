@@ -370,6 +370,10 @@ class Solver:
     # layer, all in parallel at the tabs (full 3-D collector; resolves through-thickness
     # potential/current gradients driven by the 3-D temperature field).
     collector_model: Literal["planar", "layered"] = "planar"
+    # Record per-step FIELD histories (SOC and areal current density) on the Result, alongside
+    # the always-recorded temperature history — needed for animating field evolution (viz3d /
+    # notebook). Off by default: it multiplies Result memory by ~3.
+    save_fields: bool = False
 
 
 # --------------------------------------------------------------------------- #

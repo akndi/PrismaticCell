@@ -114,6 +114,81 @@ def _save(fig, path):
 
 
 # --------------------------------------------------------------------------- #
+# field-history access (shared with viz3d)
+# --------------------------------------------------------------------------- #
+FIELD_CMAPS = {"T": _CMAP_TEMP, "soc": "viridis", "current": "coolwarm"}
+FIELD_LABELS = {"T": "temperature [°C]", "soc": "SOC [-]", "current": "areal current [A/m²]"}
+
+
+def field_frames(result, field: str) -> np.ndarray:
+    """(nt, nx, ny, nz) history of 'T' | 'soc' | 'current' (display units for T handled by
+    :func:`field_display`)."""
+    if field == "T":
+        tf = np.asarray(result.T_field, dtype=float)
+        return tf[None, ...] if tf.ndim == 3 else tf
+    hist = result.soc_hist if field == "soc" else result.j_hist
+    hist = np.asarray(hist, dtype=float)
+    if hist.ndim != 4 or hist.shape[0] == 0:
+        raise ValueError(
+            f"no '{field}' field history on this Result -- run with solver.save_fields = true "
+            "(cycling.configure_cycling enables it by default)")
+    return hist
+
+
+def field_display(frames: np.ndarray, field: str) -> np.ndarray:
+    """Convert stored units to display units (kelvin -> Celsius for T)."""
+    return frames - _KELVIN_OFFSET if field == "T" else frames
+
+
+def field_norm(result, field: str):
+    """(vmin, vmax) over the WHOLE history -- stable colors across animation frames."""
+    disp = field_display(field_frames(result, field), field)
+    return float(np.nanmin(disp)), float(np.nanmax(disp))
+
+
+def plot_plane_field(result, field: str = "T", ti: int = -1, how: str = "mid",
+                     vminmax=None, path: Optional[str] = None):
+    """Electrode-plane heatmap of any field ('T' | 'soc' | 'current') at time index ``ti``.
+
+    Same true-aspect strip styling as :func:`plot_temperature_slice`; tab overlay only on the
+    temperature view (the tab fin model is thermal).
+    """
+    geom = result.geom
+    _, la, ha = _axes(geom)
+    frames = field_display(field_frames(result, field), field)
+    nt = frames.shape[0]
+    it = int(np.clip(ti if ti >= 0 else nt + ti, 0, nt - 1))
+    plane, info = _electrode_plane(geom, frames[it], how=how)
+    extent = _extent_mm(geom)
+    L_mm, H_mm = extent[1], extent[3]
+    vmin, vmax = vminmax if vminmax is not None else field_norm(result, field)
+
+    fig_w = 13.0
+    fig_h = max(fig_w * (H_mm / max(L_mm, 1e-9)) * 1.35 + 1.7, 3.2)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    im = ax.imshow(plane.T, origin="lower", extent=extent, aspect="equal",
+                   cmap=FIELD_CMAPS[field], interpolation="bilinear", vmin=vmin, vmax=vmax)
+    if field == "T":
+        tfield = field_frames(result, "T")[it]
+        _overlay_tabs(geom, tfield, ax, im, dict(getattr(result, "p_tab_final", {}) or {}))
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    ax.tick_params(labelsize=8.5, length=3)
+    ax.set_xlabel(f"length ({_AXNAME[la]}) [mm]", fontsize=9.5)
+    ax.set_ylabel(f"height ({_AXNAME[ha]}) [mm]", fontsize=9.5)
+    t = float(np.asarray(result.t).ravel()[it])
+    ax.set_title(f"{FIELD_LABELS[field]} on the electrode plane  ·  {info}  ·  t = {t:.0f} s",
+                 fontsize=11, loc="left", pad=10)
+    cbar = fig.colorbar(im, ax=ax, orientation="horizontal", fraction=0.055,
+                        pad=0.16, shrink=0.5, anchor=(0.0, 1.0))
+    cbar.set_label(FIELD_LABELS[field], fontsize=9)
+    cbar.ax.tick_params(labelsize=8)
+    cbar.outline.set_visible(False)
+    fig.tight_layout()
+    return _save(fig, path)
+
+
+# --------------------------------------------------------------------------- #
 # time series
 # --------------------------------------------------------------------------- #
 def plot_time_series(result, path: Optional[str] = None):
@@ -428,6 +503,112 @@ def tab_thermal_profiles(result, cooling=None, n: int = 25) -> dict:
         out[pol] = dict(xi=xi, T=T, T_root=t_root, T_sink=t_sink, T_peak=t_peak,
                         P=p_tab, R_tab=r_tab)
     return out
+
+
+_LAYER_TITLES = {
+    "pos_collector": "cathode current collector (Al)",
+    "cathode_coating": "cathode coating (LFP)",
+    "separator": "separator",
+    "anode_coating": "anode coating (graphite)",
+    "neg_collector": "anode current collector (Cu)",
+}
+
+
+def sandwich_to_slice(geom, sandwich: int):
+    """Map a 1-based global sandwich number -> (roll_index, mesh slice s, n_per_slice).
+
+    Sandwiches count in stacking order across the rolls (1..Σ n_stacks). The mesh does NOT
+    resolve individual sandwiches — several share one mesh slice along the stack axis — so the
+    returned slice is the one CONTAINING the requested sandwich; ``n_per_slice`` says how many
+    share it (reported on the plots for honesty).
+    """
+    total = sum(r.n_stacks for r in geom.rolls)
+    if not (1 <= sandwich <= total):
+        raise ValueError(f"sandwich must be 1..{total}, got {sandwich}")
+    m = sandwich - 1
+    for roll in geom.rolls:
+        if m < roll.n_stacks:
+            ss = sorted({s for zs in roll.col_zcells.values() for s in zs})
+            per = roll.n_stacks / max(len(ss), 1)
+            s = ss[min(int(m / per), len(ss) - 1)]
+            return roll.roll_index, s, per
+        m -= roll.n_stacks
+    raise AssertionError("unreachable")
+
+
+def plot_stack_layer_maps(result, sandwich: int = 1, layer: str = "neg_collector",
+                          ti: Optional[int] = None, path: Optional[str] = None):
+    """(4) 2-D maps for one LAYER of one NUMBERED sandwich (e.g. anode current collector of
+    sandwich #5): temperature, SOC and current on the electrode plane at time index ``ti``
+    (default: final).
+
+    Fidelity notes, printed on the figure: the thermal/ECM model homogenizes the sandwich, so
+    temperature and SOC are shared by all layers at a location; the mesh slice containing the
+    sandwich is what is shown (several sandwiches share it). The third panel depends on the
+    layer: coatings/separator show the through-cell areal current density of that slice;
+    a current-collector layer shows ITS foil's solved potential drop (the in-plane current
+    driver), since in-plane foil current is a per-foil quantity.
+    """
+    geom = result.geom
+    if layer not in _LAYER_TITLES:
+        raise ValueError(f"layer must be one of {sorted(_LAYER_TITLES)}, got '{layer}'")
+    sa, la, ha = _axes(geom)
+    r, s, per = sandwich_to_slice(geom, sandwich)
+
+    tf = np.asarray(result.T_field, dtype=float)
+    tf = tf[None, ...] if tf.ndim == 3 else tf
+    nt = tf.shape[0]
+    it = int(np.clip(ti if ti is not None else nt - 1, -nt, nt - 1))
+    T3 = tf[it]
+    soc_h = np.asarray(getattr(result, "soc_hist", np.zeros(0)), dtype=float)
+    j_h = np.asarray(getattr(result, "j_hist", np.zeros(0)), dtype=float)
+    soc3 = soc_h[it] if soc_h.ndim == 4 and soc_h.shape[0] == nt else result.soc_field_final
+    j3 = j_h[it] if j_h.ndim == 4 and j_h.shape[0] == nt else result.j_field_final
+
+    def plane(v3):
+        return np.take(np.asarray(v3, dtype=float), s, axis=sa)
+
+    panels = [("temperature [°C]", _k_to_c(plane(T3)), _CMAP_TEMP),
+              ("SOC [-]", plane(soc3), "viridis")]
+    if layer in ("pos_collector", "neg_collector"):
+        pol = "pos" if layer == "pos_collector" else "neg"
+        maps = [m for m in (getattr(result, "phi_final", {}) or {}).get(pol, []) if m is not None]
+        phi = maps[r] if r < len(maps) else (maps[0] if maps else None)
+        if phi is not None:
+            dv = (np.asarray(phi, dtype=float) - np.nanmin(phi)) * 1e3
+            panels.append((f"{'Al' if pol == 'pos' else 'Cu'} foil potential drop [mV]",
+                           dv, "magma"))
+        else:
+            panels.append(("areal current [A/m²]", plane(j3), "coolwarm"))
+    else:
+        panels.append(("areal current [A/m²]", plane(j3), "coolwarm"))
+
+    extent = _extent_mm(geom)
+    L_mm, H_mm = extent[1], extent[3]
+    fig_w = 12.5
+    strip_h = float(np.clip(fig_w * (H_mm / max(L_mm, 1e-9)) * 1.35, 1.3, 3.2))
+    fig, axes = plt.subplots(len(panels), 1, figsize=(fig_w, len(panels) * (strip_h + 0.75)),
+                             sharex=True)
+    for ax, (lbl, data, cmap) in zip(np.atleast_1d(axes), panels):
+        im = ax.imshow(data.T, origin="lower", extent=extent, aspect="equal",
+                       cmap=cmap, interpolation="bilinear")
+        cb = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
+        cb.set_label(lbl, fontsize=8)
+        cb.ax.tick_params(labelsize=7)
+        cb.outline.set_visible(False)
+        for sp in ax.spines.values():
+            sp.set_visible(False)
+        ax.tick_params(labelsize=8)
+        ax.set_ylabel("height [mm]", fontsize=8.5)
+    np.atleast_1d(axes)[-1].set_xlabel(f"length ({_AXNAME[la]}) [mm]", fontsize=9)
+    t = float(np.asarray(result.t).ravel()[it])
+    fig.suptitle(
+        f"Sandwich #{sandwich} — {_LAYER_TITLES[layer]}  ·  t = {t:.0f} s\n"
+        f"(roll {r + 1}, mesh slice {_AXNAME[sa]}={s}; ~{per:.0f} sandwiches share this slice; "
+        "T/SOC are homogenized across the sandwich layers)",
+        fontsize=10, x=0.02, ha="left")
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    return _save(fig, path)
 
 
 def plot_collector_planes(result, path: Optional[str] = None):
