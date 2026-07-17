@@ -399,6 +399,45 @@ def test_tab_joule_steady_mode_converges():
     assert t_root > 298.15                      # solved and warmed above coolant
 
 
+def test_tab_sink_t_regimes_are_monotonic():
+    """Weld temperature rises monotonically across terminal regimes: coolant-sunk (25 C) <
+    warm busbar (35 C) < not heat-sunk (adiabatic tip); energy closes in all three."""
+    from prismaticcell.geometry import tab_attachment_cells
+
+    def weld_T(heat_sink, sink_t=None):
+        cool = Cooling(y_min=FaceBC("convection", h=100.0, t_inf=298.15),
+                       y_max=FaceBC("convection", h=100.0, t_inf=298.15))
+        cfg = _cfg("y", width=0.20, height=0.12, cooling=cool)
+        cfg.solver.mode = "steady"
+        cfg.load = Load("constant_current", 150.0)
+        cfg.enclosure.tab_heat_sink = heat_sink
+        cfg.enclosure.tab_sink_t = sink_t
+        res = coupling.run(cfg)
+        tf = res.T_field[-1]
+        g = res.geom
+        cells = tab_attachment_cells(g, "pos") + tab_attachment_cells(g, "neg")
+        assert abs(res.energy_balance["closure_rel"]) < 1e-6
+        return float(np.mean([tf[c] for c in cells]))
+
+    t_cool = weld_T(True)                       # sink at coolant (t_inf = 298.15)
+    t_warm = weld_T(True, sink_t=308.15)        # busbar at 35 C
+    t_free = weld_T(False)                      # adiabatic tip
+    assert t_cool < t_warm < t_free
+
+
+def test_tab_sink_t_validation():
+    """tab_sink_t with tab_heat_sink=false (dead knob) or non-positive value is rejected."""
+    cfg = _cfg("y", width=0.20, height=0.12)
+    cfg.enclosure.tab_heat_sink = False
+    cfg.enclosure.tab_sink_t = 308.15
+    with pytest.raises(ValueError):
+        cfg.validate()
+    cfg.enclosure.tab_heat_sink = True
+    cfg.enclosure.tab_sink_t = -5.0
+    with pytest.raises(ValueError):
+        cfg.validate()
+
+
 def test_tab_joule_energy_closure_high_current():
     """Energy balance still closes with the tab Joule backflow active at high current."""
     cool = Cooling(y_min=FaceBC("convection", h=100.0, t_inf=298.15),

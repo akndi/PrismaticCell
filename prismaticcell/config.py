@@ -177,8 +177,14 @@ class Enclosure:
     material: str               # key into material database
     wall_thickness: float       # m
     contact_conductance: float  # W/m^2/K, stack<->wall interfacial conductance
-    tab_heat_sink: bool = True  # if True, tabs conduct heat to ambient at their far end
-                                # (busbar/terminal heat-sunk near the coolant temperature)
+    tab_heat_sink: bool = True  # if True, tabs conduct heat to a terminal/busbar sink at their
+                                # far end; if False the tab tip is adiabatic (ALL tab I2R returns
+                                # into the weld cells)
+    # Terminal/busbar sink temperature [K] for the tab heat path. None (default) = assume the
+    # terminal sits near the coolant (mean t_inf of the non-adiabatic faces). Set an explicit
+    # value when the busbar is NOT cooled (it usually runs warmer than the coolant) — the tab
+    # then conducts to THAT temperature. Only meaningful with tab_heat_sink: true.
+    tab_sink_t: Optional[float] = None
     insulator: Optional["Insulator"] = None  # bottom (or top) insulating slab; None = absent
     # How the enclosure wall is represented thermally:
     #  - "shell" (default): a sub-grid conductive shell wraps the cavity mesh, giving the wall
@@ -472,6 +478,12 @@ class SimConfig:
                 errors.append("enclosure.outer_dims requires wall_model 'shell' (a fixed can meshes "
                               "the roll bbox and represents the wall as a sub-grid shell); remove "
                               "outer_dims or set wall_model: shell")
+        if self.enclosure.tab_sink_t is not None:
+            if not self.enclosure.tab_heat_sink:
+                errors.append("enclosure.tab_sink_t has no effect with tab_heat_sink: false "
+                              "(the tab tip is adiabatic); remove one of the two")
+            elif self.enclosure.tab_sink_t <= 0:
+                errors.append("enclosure.tab_sink_t must be a positive temperature in kelvin")
         ins = self.enclosure.insulator
         if ins is not None:
             if ins.material not in known:

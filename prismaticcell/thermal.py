@@ -305,14 +305,18 @@ class ThermalOperator:
                     sl, af = _face_slice[f]
                     Mi3[sl] += mt * af
 
-        # Tab conduction-to-ambient heat loss (PHYSICS §5): the tab's far end is heat-sunk near
-        # the coolant temperature. Distribute each polarity's tab thermal conductance over its
-        # attachment control volumes (the tab-node columns, across their active z-cells). Tab
-        # sink temperature = mean of the non-adiabatic face temperatures (config-driven).
-        tinfs = [f.t_inf for f in (cooling.top, cooling.bottom, cooling.x_min,
-                                   cooling.x_max, cooling.y_min, cooling.y_max)
-                 if f.kind in ("convection", "dirichlet")]
-        t_tab = float(np.mean(tinfs)) if tinfs else float(cooling.top.t_inf)
+        # Tab conduction heat path (PHYSICS §5): the tab's far end conducts to the terminal/busbar
+        # sink. Sink temperature = enclosure.tab_sink_t when given (busbar NOT at coolant
+        # temperature), else the mean of the non-adiabatic face temperatures (terminal near the
+        # coolant). Each polarity's conductance is distributed over its attachment CVs.
+        sink_override = getattr(geom, "tab_sink_t", None)
+        if sink_override is not None:
+            t_tab = float(sink_override)
+        else:
+            tinfs = [f.t_inf for f in (cooling.top, cooling.bottom, cooling.x_min,
+                                       cooling.x_max, cooling.y_min, cooling.y_max)
+                     if f.kind in ("convection", "dirichlet")]
+            t_tab = float(np.mean(tinfs)) if tinfs else float(cooling.top.t_inf)
 
         def _apply_tab_thermal(polarity, g_total):
             if g_total <= 0.0:

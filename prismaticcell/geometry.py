@@ -117,6 +117,9 @@ class Geometry:
     # Out-of-cell tab protrusion length per polarity [m] (max over that polarity's tabs) — used by
     # viz to draw the physical tab sticking out beyond the electrode edge.
     tab_protrusion: Dict[str, float] = field(default_factory=dict)
+    # Explicit terminal/busbar sink temperature [K] for the tab heat path (enclosure.tab_sink_t);
+    # None = derive from the cooling faces (terminal near coolant temperature).
+    tab_sink_t: float = None
 
     @property
     def n_active(self) -> int:
@@ -513,6 +516,7 @@ def build_geometry(cfg: SimConfig) -> Geometry:
         inter_roll_R_area=inter_roll_R_area, inter_roll_rhocp_t=inter_roll_rhocp_t,
         face_area_scale=face_area_scale,
         tab_protrusion=tab_protrusion,
+        tab_sink_t=cfg.enclosure.tab_sink_t,
     )
 
 

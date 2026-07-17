@@ -57,7 +57,12 @@ enclosure:
   headspace_fill: gap_air    # gas headspace above the roll (electrolyte level = roll top)
   contact_conductance: 150.0
   wall_model: shell
-  tab_heat_sink: true
+  # Terminal/busbar is NOT cooled in this pack: no coolant-temperature heat sink at the tab tip
+  # (all tab I2R returns into the weld cells -> welds run HOT, the realistic worst case).
+  # If you later know the busbar temperature, model it instead with:
+  #   tab_heat_sink: true
+  #   tab_sink_t: 308.15        # K, e.g. busbar at 35 C -- tab conducts to THAT temperature
+  tab_heat_sink: false
   insulator:                 # bottom-insulation film: full-footprint slab on the can floor
     material: pp_insulator   # polypropylene (k ~ 0.20 W/m.K)
     thickness: 5.0e-4        # m (0.5 mm) -- roll sits on this; adds t/k series R on the bottom face

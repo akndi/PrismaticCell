@@ -336,9 +336,12 @@ def plot_current_distribution(result, path: Optional[str] = None):
 def _tab_sink_temp(cooling, geom, tfield) -> float:
     """Terminal/busbar sink temperature the tab far-end is heat-sunk to.
 
-    Matches the thermal solver: the mean ``t_inf`` of the non-adiabatic faces. If ``cooling`` is
-    not supplied, fall back to the coldest active cell (a reasonable coolant-side proxy).
+    Matches the thermal solver: an explicit ``geom.tab_sink_t`` (busbar temperature) wins;
+    else the mean ``t_inf`` of the non-adiabatic faces; else the coldest active cell.
     """
+    override = getattr(geom, "tab_sink_t", None)
+    if override is not None:
+        return float(override)
     if cooling is not None:
         faces = (cooling.top, cooling.bottom, cooling.x_min, cooling.x_max,
                  cooling.y_min, cooling.y_max)

@@ -217,10 +217,14 @@ Faces may be named **physically** (`top`/`bottom` = +z/-z, `x_min/x_max`, `y_min
   **gray-diffuse surface with view factor 1** to large isothermal surroundings at `T_∞` (valid
   for an isolated convex cell); the radiative sink is taken equal to the convective `T_∞`.
 - **Tab heat path** (`enclosure.tab_heat_sink`, default on): each tab conducts heat from its
-  attachment control volumes to ambient with conductance `k·w·t/L` (far end heat-sunk near the
-  mean coolant temperature) **and returns half of its own Joule dissipation into those CVs (all of
-  it when not heat-sunk) — see §4 tab Joule backflow**. A real bidirectional terminal heat path;
-  with `tab_heat_sink: false` the tab becomes a pure heat source into its root.
+  attachment control volumes to the terminal/busbar sink with conductance `k·w·t/L` **and returns
+  half of its own Joule dissipation into those CVs (all of it when not heat-sunk) — see §4 tab
+  Joule backflow**. The sink temperature is `enclosure.tab_sink_t` when given (a busbar that is
+  NOT at coolant temperature — the usual pack reality), else the mean `t_inf` of the non-adiabatic
+  faces (terminal near the coolant). This boundary condition decides the near-tab signature:
+  a coolant-sunk terminal makes the welds the COLDEST spots on the foil; a floating terminal
+  (`tab_heat_sink: false`, adiabatic tip) makes them the HOTTEST (current crowding + full I²R
+  backflow); an explicit warm `tab_sink_t` interpolates between the regimes.
 - **Stack↔wall contact** (`enclosure.contact_conductance`): a series interfacial conductance
   `G = h_c·A` at the wall interface (at can-wall control-volume faces in `mesh` mode, or in the
   boundary BC series in `shell` mode).
