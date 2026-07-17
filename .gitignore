@@ -17,3 +17,4 @@ outputs/
 configs/_notebook_cell.yaml
 configs/_cycling_profile.csv
 notebooks/.ipynb_checkpoints/
+notebooks/cell_explorer_executed.ipynb
