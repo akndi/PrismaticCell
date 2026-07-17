@@ -48,6 +48,25 @@ class ThermalOperator:
     g_amb: np.ndarray = field(default_factory=lambda: np.zeros(0))
     gt_amb: np.ndarray = field(default_factory=lambda: np.zeros(0))
     q_flux_out: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    # Cached LU factorizations (per dt, plus the steady A). A and M are immutable for the
+    # lifetime of an operator instance (radiation reassembles a NEW instance each step), so the
+    # factorization can be reused across timesteps/sub-iterations — the dominant cost at large
+    # meshes is the factorization, not the triangular solves.
+    _lu_cache: dict = field(default_factory=dict, repr=False, compare=False)
+
+    def factorized(self, dt: float):
+        """LU of the backward-Euler system (M/dt + A), cached per dt."""
+        key = float(dt)
+        if key not in self._lu_cache:
+            Asys = (sp.diags(self.M / key) + self.A).tocsc()
+            self._lu_cache[key] = spla.splu(Asys)
+        return self._lu_cache[key]
+
+    def factorized_steady(self):
+        """LU of the steady system A, cached."""
+        if "steady" not in self._lu_cache:
+            self._lu_cache["steady"] = spla.splu(self.A.tocsc())
+        return self._lu_cache["steady"]
 
     @classmethod
     def assemble(cls, geom: Geometry, cooling: Cooling,
@@ -363,9 +382,9 @@ def _q_source(op: ThermalOperator, q_vol: np.ndarray) -> np.ndarray:
 
 
 def solve_steady(op: ThermalOperator, q_vol: np.ndarray) -> np.ndarray:
-    """Solve the steady conduction system ``A T = b_bc + q_vol * V``."""
+    """Solve the steady conduction system ``A T = b_bc + q_vol * V`` (cached LU)."""
     rhs = op.b_bc + _q_source(op, q_vol)
-    T = spla.spsolve(op.A.tocsc(), rhs)
+    T = op.factorized_steady().solve(rhs)
     return np.asarray(T, dtype=np.float64)
 
 
@@ -374,16 +393,18 @@ def step_transient(op: ThermalOperator, T_prev: np.ndarray, q_vol: np.ndarray,
     """Advance one backward-Euler step (PHYSICS §5.3).
 
     Solves ``(M/dt + A) T = (M/dt) T_prev + b_bc + q_vol*V``.
-    ``linear_solver`` is ``"direct"`` (spsolve) or ``"cg"`` (Jacobi-preconditioned CG).
+    ``linear_solver`` is ``"direct"`` (cached-LU triangular solves; the factorization is done
+    once per operator instance and dt) or ``"cg"`` (Jacobi-preconditioned CG).
     """
     T_prev = np.asarray(T_prev, dtype=np.float64).ravel()
     mdt = op.M / dt
-    Asys = (op.A + sp.diags(mdt)).tocsr()
     rhs = mdt * T_prev + op.b_bc + _q_source(op, q_vol)
 
     if linear_solver == "direct":
-        T = spla.spsolve(Asys.tocsc(), rhs)
-    elif linear_solver == "cg":
+        T = op.factorized(dt).solve(rhs)
+        return np.asarray(T, dtype=np.float64)
+    Asys = (op.A + sp.diags(mdt)).tocsr()
+    if linear_solver == "cg":
         diag = Asys.diagonal()
         diag = np.where(diag != 0.0, diag, 1.0)
         precond = sp.diags(1.0 / diag)            # Jacobi / diagonal preconditioner
